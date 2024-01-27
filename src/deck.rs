@@ -1,8 +1,5 @@
 use crate::card::{Card, Suit};
-#[cfg(not(target_arch = "wasm32"))]
-use crate::mock::*;
-#[cfg(target_arch = "wasm32")]
-use cdfy_sdk::rand;
+use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
@@ -40,6 +37,7 @@ impl Display for Deck {
 }
 
 pub fn with_jokers(jokers: usize) -> Vec<Card> {
+    let mut rng = rand::thread_rng();
     let mut cards = vec![];
     for suit in Suit::suits().iter() {
         for number in 1u8..=13 {
@@ -49,15 +47,8 @@ pub fn with_jokers(jokers: usize) -> Vec<Card> {
     for _ in 0..jokers {
         cards.push(Card::Joker(None))
     }
-    shuffle(&mut cards);
+    cards.shuffle(&mut rng);
     cards
-}
-
-pub fn shuffle<T>(items: &mut Vec<T>) {
-    let l = items.len();
-    for i in 0..l {
-        items.swap(i, (rand() % l as u32) as usize);
-    }
 }
 
 pub fn is_same_number(cards: &Vec<Card>) -> bool {

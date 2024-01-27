@@ -1,14 +1,11 @@
-#[cfg(not(target_arch = "wasm32"))]
-use crate::mock::*;
 use crate::{
     card::Card,
     deck::{is_same_number, match_suits, number, remove_items, with_jokers, Deck, DeckStyle},
     effect::{effect_card, effect_one_chance, servable_9, Effect},
-    will_flush,
+    plugin::LiveEvent,
 };
 use anyhow::{anyhow, Result};
-#[cfg(target_arch = "wasm32")]
-use cdfy_sdk::{debug, rand};
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
@@ -16,10 +13,9 @@ use std::{
 };
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct CareerPokerState {
-    pub room_id: String,
-    pub current: Option<String>,
+pub struct Game {
     pub players: Vec<String>,
+    pub current: Option<String>,
     pub river: Vec<Deck>,
     pub will_flush_task_id: Option<String>,
     pub last_served_player_id: Option<String>,
@@ -28,6 +24,24 @@ pub struct CareerPokerState {
     pub effect: Effect,
     /// pair of user id to deck id for prompt cards
     pub prompts: HashMap<String, String>,
+}
+
+impl Default for Game {
+    fn default() -> Self {
+        Self {
+            players: vec![],
+            river: vec![],
+            will_flush_task_id: None,
+            last_served_player_id: None,
+            current: None,
+            fields: HashMap::from_iter(vec![
+                ("trushes".to_string(), Deck::new(vec![])),
+                ("excluded".to_string(), Deck::new(vec![])),
+            ]),
+            effect: Effect::new(),
+            prompts: HashMap::new(),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -58,39 +72,29 @@ pub enum Action {
     },
 }
 
-impl Default for CareerPokerState {
-    fn default() -> Self {
-        Self {
-            room_id: "".to_string(),
-            river: vec![],
-            will_flush_task_id: None,
-            players: vec![],
-            last_served_player_id: None,
-            current: None,
-            fields: HashMap::from_iter(vec![
-                ("trushes".to_string(), Deck::new(vec![])),
-                ("excluded".to_string(), Deck::new(vec![])),
-            ]),
-            effect: Effect::new(),
-            prompts: HashMap::new(),
-        }
+impl Action {
+    pub fn from_event(event: &LiveEvent) -> Result<Self> {
+        todo!()
     }
 }
 
-impl CareerPokerState {
-    pub fn new(room_id: String) -> Self {
-        Self {
-            room_id,
-            ..Default::default()
-        }
+pub fn will_flush(player_id: String, to: String) -> String {
+    todo!()
+    // reserve(
+    //     player_id,
+    //     room_id,
+    //     serde_json::to_string(&Action::Flush { to }).unwrap(),
+    //     5000,
+    // )
+}
+
+impl Game {
+    pub fn apply_action(&mut self, action: Action) -> Result<()> {
+        todo!()
     }
 
-    fn reset(&mut self) -> Self {
-        Self {
-            room_id: self.room_id.clone(),
-            players: self.players.clone(),
-            ..Default::default()
-        }
+    pub fn cancel_task(&mut self, task_id: String) {
+        todo!()
     }
 
     fn deck_mut(&mut self, id: &str) -> Result<&mut Deck> {
@@ -107,24 +111,10 @@ impl CareerPokerState {
         Ok(deck)
     }
 
-    pub fn join(&mut self, player_id: String) {
-        if !self.players.contains(&player_id) {
-            self.players.push(player_id.clone());
-        }
-    }
-
-    pub fn leave(&mut self, player_id: String) {
-        if let Some(i) = self.players.iter().position(|id| id == &player_id) {
-            self.players.remove(i);
-            self.fields.remove(&player_id);
-        }
-    }
-
     fn distribute(&mut self) -> Result<()> {
         if self.players.is_empty() {
             return Err(anyhow!("players is empty"));
         }
-        self.reset();
         let cards = with_jokers(2);
         for player_id in self.players.iter() {
             self.fields.insert(
@@ -170,11 +160,7 @@ impl CareerPokerState {
     }
 
     pub fn will_flush(&mut self, player_id: &str, to: &str) {
-        self.will_flush_task_id = Some(will_flush(
-            player_id.to_string(),
-            self.room_id.to_string(),
-            to.to_string(),
-        ));
+        self.will_flush_task_id = Some(will_flush(player_id.to_string(), to.to_string()));
     }
 
     pub fn flush(&mut self, to: String) -> Result<()> {
@@ -219,7 +205,7 @@ impl CareerPokerState {
 
     fn select_trushes(&mut self, player_id: String, serves: Vec<Card>) -> Result<()> {
         let Some(lasts) = self.river.last() else {
-           return Err(anyhow!("river is empty")); 
+            return Err(anyhow!("river is empty"));
         };
         let n = self.deck("trushes")?.cards.len().min(lasts.cards.len());
         if n != serves.len() {
@@ -233,7 +219,7 @@ impl CareerPokerState {
 
     fn select_excluded(&mut self, player_id: String, serves: Vec<Card>) -> Result<()> {
         let Some(lasts) = self.river.last() else {
-           return Err(anyhow!("river is empty")); 
+            return Err(anyhow!("river is empty"));
         };
         let n = self.deck("trushes")?.cards.len().min(lasts.cards.len());
         if n != serves.len() {
@@ -247,7 +233,7 @@ impl CareerPokerState {
 
     fn select_passes(&mut self, player_id: String, serves: Vec<Card>) -> Result<()> {
         let Some(lasts) = self.river.last() else {
-           return Err(anyhow!("river is empty")); 
+            return Err(anyhow!("river is empty"));
         };
         let n = self.deck(&player_id)?.cards.len().min(lasts.cards.len());
         if n != serves.len() {
@@ -274,7 +260,8 @@ impl CareerPokerState {
             .values()
             .filter(|hand| !hand.cards.is_empty())
             .count();
-        if rand() % active_players as u32 != 0 {
+        let mut rng = rand::thread_rng();
+        if rng.gen_range(0..active_players) != 0 {
             return Ok(());
         }
         effect_one_chance(self, &player_id, &serves);
@@ -351,7 +338,7 @@ fn deck_ord(lhs: &Vec<Card>, rhs: &Vec<Card>) -> Ordering {
     vec_ord(lhs.iter(), rhs.iter(), card_ord)
 }
 
-pub fn servable(state: &CareerPokerState, serves: &Vec<Card>) -> bool {
+pub fn servable(state: &Game, serves: &Vec<Card>) -> bool {
     let mut ok = is_same_number(serves);
     let Some(lasts) = state.river.last() else {
         // river is empty
@@ -387,13 +374,13 @@ pub fn servable(state: &CareerPokerState, serves: &Vec<Card>) -> bool {
 mod tests {
     use crate::{
         deck::Deck,
-        state::{servable, Action, CareerPokerState},
+        game::{servable, Action, Game},
     };
     use std::collections::HashMap;
 
     #[test]
     fn test_servable() {
-        let mut state = CareerPokerState::new("".to_string());
+        let mut state = Game::default();
         let serves = vec!["3h".into(), "3d".into()];
         assert_eq!(servable(&state, &serves), true);
 
@@ -406,7 +393,7 @@ mod tests {
 
     #[test]
     fn test_get_relative_player() {
-        let mut state = CareerPokerState::new("".to_string());
+        let mut state = Game::default();
         state.fields = HashMap::from_iter(vec![
             ("a".to_string(), Deck::new(vec!["Ah".into()])),
             ("b".to_string(), Deck::new(vec!["Ah".into()])),
@@ -418,7 +405,7 @@ mod tests {
         assert_eq!(state.get_relative_player("a", 2), Some("c".to_string()));
         assert_eq!(state.get_relative_player("a", 3), Some("a".to_string()));
 
-        let mut state = CareerPokerState::new("".to_string());
+        let mut state = Game::default();
         state.fields = HashMap::from_iter(vec![
             ("a".to_string(), Deck::new(vec!["Ah".into()])),
             ("b".to_string(), Deck::new(vec!["Ah".into()])),
@@ -431,7 +418,7 @@ mod tests {
 
     #[test]
     fn test_effect_12() {
-        let mut state = CareerPokerState::new("".to_string());
+        let mut state = Game::default();
         state.fields = HashMap::from_iter(vec![
             ("a".to_string(), Deck::new(vec!["Ah".into()])),
             ("b".to_string(), Deck::new(vec!["Ah".into()])),
@@ -444,7 +431,7 @@ mod tests {
 
     #[test]
     fn test_effect_4() {
-        let mut state = CareerPokerState::new("".to_string());
+        let mut state = Game::default();
         state.fields = HashMap::from_iter(vec![
             ("a".to_string(), Deck::new(vec![])),
             ("trushes".to_string(), Deck::new(vec!["Ah".into()])),

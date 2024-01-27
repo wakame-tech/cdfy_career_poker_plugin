@@ -3,20 +3,13 @@ name = "cdfy_career_poker_plugin"
 version = "0.1.0"
 edition = "2021"
 
+[dependencies]
+serde = "1.0.148"
+serde_json = "1.0.89"
+tera = { version = "1", default-features = false }
+anyhow = { version = "1.0", default-features = false }
+extism-pdk = "1.0.0"
+rand = "0.8.5"
+
 [lib]
 crate-type = ["cdylib"]
-
-[profile.release]
-opt-level = 's'
-lto = true
-
-[dependencies]
-anyhow = "1"
-cdfy-sdk = { path = "../../crates/cdfy-sdk" }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0.93"
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-rand = "0.8.5"
-[dev-dependencies]
-itertools = "0.10.5"
-inquire = "0.5.3"

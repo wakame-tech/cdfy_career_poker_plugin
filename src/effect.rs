@@ -1,13 +1,9 @@
-#[cfg(not(target_arch = "wasm32"))]
-use crate::mock::cancel;
 use crate::{
     card::{Card, Suit},
     deck::{number, suits, Deck, DeckStyle},
-    state::CareerPokerState,
+    game::Game,
 };
 use anyhow::{anyhow, Result};
-#[cfg(target_arch = "wasm32")]
-use cdfy_sdk::cancel;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -49,20 +45,20 @@ impl Effect {
     }
 }
 
-pub fn effect_revolution(state: &mut CareerPokerState, _player_id: &str, serves: &Vec<Card>) {
+pub fn effect_revolution(state: &mut Game, _player_id: &str, serves: &Vec<Card>) {
     if serves.len() == 4 {
         state.effect.revoluted = !state.effect.revoluted;
     }
 }
 
-pub fn effect_3(state: &mut CareerPokerState, player_id: &str, _serves: &Vec<Card>) {
+pub fn effect_3(state: &mut Game, player_id: &str, _serves: &Vec<Card>) {
     if !state.effect.effect_limits.contains(&3) {
         state.effect.effect_limits.extend(1..=13)
     }
     state.next(player_id);
 }
 
-pub fn effect_4(state: &mut CareerPokerState, player_id: &str, _serves: &Vec<Card>) {
+pub fn effect_4(state: &mut Game, player_id: &str, _serves: &Vec<Card>) {
     if !state.effect.effect_limits.contains(&4) {
         let hands = state.fields.get(player_id).expect("deck not found");
         let trushes = state.fields.get("trushes").expect("trushes not found");
@@ -78,7 +74,7 @@ pub fn effect_4(state: &mut CareerPokerState, player_id: &str, _serves: &Vec<Car
     }
 }
 
-pub fn effect_5(state: &mut CareerPokerState, player_id: &str, serves: &Vec<Card>) {
+pub fn effect_5(state: &mut Game, player_id: &str, serves: &Vec<Card>) {
     if !state.effect.effect_limits.contains(&5) {
         state.current = state.get_relative_player(player_id, 1 + serves.len() as i32);
         if state.current == Some(player_id.to_string()) {
@@ -89,7 +85,7 @@ pub fn effect_5(state: &mut CareerPokerState, player_id: &str, serves: &Vec<Card
     }
 }
 
-pub fn effect_7(state: &mut CareerPokerState, player_id: &str, _serves: &Vec<Card>) {
+pub fn effect_7(state: &mut Game, player_id: &str, _serves: &Vec<Card>) {
     let hands = state.fields.get(player_id).unwrap();
     if !state.effect.effect_limits.contains(&7) && !hands.cards.is_empty() {
         state
@@ -100,7 +96,7 @@ pub fn effect_7(state: &mut CareerPokerState, player_id: &str, _serves: &Vec<Car
     }
 }
 
-pub fn effect_8(state: &mut CareerPokerState, player_id: &str, _serves: &Vec<Card>) {
+pub fn effect_8(state: &mut Game, player_id: &str, _serves: &Vec<Card>) {
     if !state.effect.effect_limits.contains(&8) {
         state.will_flush(player_id, "trushes");
     } else {
@@ -108,7 +104,7 @@ pub fn effect_8(state: &mut CareerPokerState, player_id: &str, _serves: &Vec<Car
     }
 }
 
-pub fn effect_9(state: &mut CareerPokerState, player_id: &str, _serves: &Vec<Card>) {
+pub fn effect_9(state: &mut Game, player_id: &str, _serves: &Vec<Card>) {
     if !state.effect.effect_limits.contains(&9) {
         state.effect.river_size = match state.effect.river_size {
             Some(1) => Some(3),
@@ -119,7 +115,7 @@ pub fn effect_9(state: &mut CareerPokerState, player_id: &str, _serves: &Vec<Car
     state.next(&player_id);
 }
 
-pub fn servable_9(state: &CareerPokerState, _serves: &Vec<Card>) -> bool {
+pub fn servable_9(state: &Game, _serves: &Vec<Card>) -> bool {
     let river_size = state.effect.river_size.unwrap();
     match river_size {
         1 | 3 => river_size == 1 || river_size == 3,
@@ -127,21 +123,21 @@ pub fn servable_9(state: &CareerPokerState, _serves: &Vec<Card>) -> bool {
     }
 }
 
-pub fn effect_10(state: &mut CareerPokerState, player_id: &str, _serves: &Vec<Card>) {
+pub fn effect_10(state: &mut Game, player_id: &str, _serves: &Vec<Card>) {
     if !state.effect.effect_limits.contains(&10) {
         state.effect.effect_limits.extend(1..10);
     }
     state.next(&player_id);
 }
 
-pub fn effect_11(state: &mut CareerPokerState, player_id: &str, _serves: &Vec<Card>) {
+pub fn effect_11(state: &mut Game, player_id: &str, _serves: &Vec<Card>) {
     if !state.effect.effect_limits.contains(&11) {
         state.effect.turn_revoluted = true;
     }
     state.next(&player_id);
 }
 
-pub fn effect_12(state: &mut CareerPokerState, player_id: &str, serves: &Vec<Card>) {
+pub fn effect_12(state: &mut Game, player_id: &str, serves: &Vec<Card>) {
     if !state.effect.effect_limits.contains(&12) {
         state.effect.is_step = true;
         state.effect.suit_limits.extend(suits(serves));
@@ -149,7 +145,7 @@ pub fn effect_12(state: &mut CareerPokerState, player_id: &str, serves: &Vec<Car
     state.next(&player_id);
 }
 
-pub fn effect_13(state: &mut CareerPokerState, player_id: &str, _serves: &Vec<Card>) {
+pub fn effect_13(state: &mut Game, player_id: &str, _serves: &Vec<Card>) {
     if !state.effect.effect_limits.contains(&13) {
         let hands = state.fields.get(player_id).unwrap();
         let excluded = state.fields.get("excluded").expect("excluded not found");
@@ -164,9 +160,9 @@ pub fn effect_13(state: &mut CareerPokerState, player_id: &str, _serves: &Vec<Ca
     }
 }
 
-pub fn effect_one_chance(state: &mut CareerPokerState, player_id: &str, serves: &Vec<Card>) {
+pub fn effect_one_chance(state: &mut Game, player_id: &str, serves: &Vec<Card>) {
     if let Some(task_id) = state.will_flush_task_id.as_ref() {
-        cancel(state.room_id.clone(), task_id.to_string());
+        state.cancel_task(task_id.to_string());
     }
     state.flush("trushes".to_string());
     let trushes = state.fields.get_mut("trushes").expect("trushes not found");
@@ -174,7 +170,7 @@ pub fn effect_one_chance(state: &mut CareerPokerState, player_id: &str, serves: 
     state.current = Some(player_id.to_string());
 }
 
-pub fn effect_2(state: &mut CareerPokerState, player_id: &str, _serves: &Vec<Card>) {
+pub fn effect_2(state: &mut Game, player_id: &str, _serves: &Vec<Card>) {
     let hands = state.fields.get(player_id).unwrap();
     let trushes = state.fields.get("trushes").expect("trushes not found");
     if !state.effect.effect_limits.contains(&2)
@@ -187,11 +183,7 @@ pub fn effect_2(state: &mut CareerPokerState, player_id: &str, _serves: &Vec<Car
     }
 }
 
-pub fn effect_card(
-    state: &mut CareerPokerState,
-    player_id: &str,
-    serves: &Vec<Card>,
-) -> Result<()> {
+pub fn effect_card(state: &mut Game, player_id: &str, serves: &Vec<Card>) -> Result<()> {
     state.effect.river_size = Some(serves.len());
 
     effect_revolution(state, player_id, serves);
