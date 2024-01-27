@@ -26,26 +26,9 @@ pub struct Game {
     pub prompts: HashMap<String, String>,
 }
 
-impl Default for Game {
-    fn default() -> Self {
-        Self {
-            players: vec![],
-            river: vec![],
-            will_flush_task_id: None,
-            last_served_player_id: None,
-            current: None,
-            fields: HashMap::from_iter(vec![
-                ("trushes".to_string(), Deck::new(vec![])),
-                ("excluded".to_string(), Deck::new(vec![])),
-            ]),
-            effect: Effect::new(),
-            prompts: HashMap::new(),
-        }
-    }
-}
-
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Action {
+    Reset,
     Distribute,
     Pass {
         player_id: String,
@@ -74,7 +57,13 @@ pub enum Action {
 
 impl Action {
     pub fn from_event(event: &LiveEvent) -> Result<Self> {
-        todo!()
+        if event.event_name == "reset" {
+            return Ok(Action::Reset);
+        }
+        if event.event_name == "distribute" {
+            return Ok(Action::Distribute);
+        }
+        Err(anyhow!("invalid event"))
     }
 }
 
@@ -89,8 +78,51 @@ pub fn will_flush(player_id: String, to: String) -> String {
 }
 
 impl Game {
+    pub fn new(player_ids: Vec<String>) -> Self {
+        let player_decks = player_ids
+            .iter()
+            .map(|id| (id.clone(), Deck::new(vec![])))
+            .collect::<HashMap<_, _>>();
+        let mut fields = HashMap::from_iter(vec![
+            ("trushes".to_string(), Deck::new(vec![])),
+            ("excluded".to_string(), Deck::new(vec![])),
+        ]);
+        fields.extend(player_decks);
+
+        Self {
+            players: player_ids,
+            river: vec![],
+            will_flush_task_id: None,
+            last_served_player_id: None,
+            current: None,
+            fields,
+            effect: Effect::new(),
+            prompts: HashMap::new(),
+        }
+    }
+
     pub fn apply_action(&mut self, action: Action) -> Result<()> {
-        todo!()
+        match action {
+            Action::Reset => {
+                *self = Self::new(self.players.clone());
+                Ok(())
+            }
+            Action::Distribute => self.distribute(),
+            Action::Pass { player_id } => self.pass(player_id),
+            Action::Flush { to } => self.flush(to),
+            Action::OneChance { player_id, serves } => self.one_chance(player_id, serves),
+            Action::Select {
+                from,
+                player_id,
+                serves,
+            } => match from.as_str() {
+                "trushes" => self.select_trushes(player_id, serves),
+                "excluded" => self.select_excluded(player_id, serves),
+                _ => Err(anyhow!("field {} not found", from)),
+            },
+            Action::ServeAnother { player_id, serves } => self.select_passes(player_id, serves),
+            Action::Serve { player_id, serves } => self.serve(player_id, serves),
+        }
     }
 
     pub fn cancel_task(&mut self, task_id: String) {
@@ -287,26 +319,6 @@ impl Game {
         }
         Ok(())
     }
-
-    pub fn action(&mut self, action: Action) -> anyhow::Result<()> {
-        match action {
-            Action::Distribute => self.distribute(),
-            Action::Pass { player_id } => self.pass(player_id),
-            Action::Flush { to } => self.flush(to),
-            Action::OneChance { player_id, serves } => self.one_chance(player_id, serves),
-            Action::Select {
-                from,
-                player_id,
-                serves,
-            } => match from.as_str() {
-                "trushes" => self.select_trushes(player_id, serves),
-                "excluded" => self.select_excluded(player_id, serves),
-                _ => Err(anyhow!("field {} not found", from)),
-            },
-            Action::ServeAnother { player_id, serves } => self.select_passes(player_id, serves),
-            Action::Serve { player_id, serves } => self.serve(player_id, serves),
-        }
-    }
 }
 
 pub fn cardinal(n: u8) -> i32 {
@@ -380,7 +392,7 @@ mod tests {
 
     #[test]
     fn test_servable() {
-        let mut state = Game::default();
+        let mut state = Game::new(vec![]);
         let serves = vec!["3h".into(), "3d".into()];
         assert_eq!(servable(&state, &serves), true);
 
@@ -393,7 +405,7 @@ mod tests {
 
     #[test]
     fn test_get_relative_player() {
-        let mut state = Game::default();
+        let mut state = Game::new(vec![]);
         state.fields = HashMap::from_iter(vec![
             ("a".to_string(), Deck::new(vec!["Ah".into()])),
             ("b".to_string(), Deck::new(vec!["Ah".into()])),
@@ -405,7 +417,7 @@ mod tests {
         assert_eq!(state.get_relative_player("a", 2), Some("c".to_string()));
         assert_eq!(state.get_relative_player("a", 3), Some("a".to_string()));
 
-        let mut state = Game::default();
+        let mut state = Game::new(vec![]);
         state.fields = HashMap::from_iter(vec![
             ("a".to_string(), Deck::new(vec!["Ah".into()])),
             ("b".to_string(), Deck::new(vec!["Ah".into()])),
@@ -418,7 +430,7 @@ mod tests {
 
     #[test]
     fn test_effect_12() {
-        let mut state = Game::default();
+        let mut state = Game::new(vec![]);
         state.fields = HashMap::from_iter(vec![
             ("a".to_string(), Deck::new(vec!["Ah".into()])),
             ("b".to_string(), Deck::new(vec!["Ah".into()])),
@@ -431,7 +443,7 @@ mod tests {
 
     #[test]
     fn test_effect_4() {
-        let mut state = Game::default();
+        let mut state = Game::new(vec![]);
         state.fields = HashMap::from_iter(vec![
             ("a".to_string(), Deck::new(vec![])),
             ("trushes".to_string(), Deck::new(vec!["Ah".into()])),

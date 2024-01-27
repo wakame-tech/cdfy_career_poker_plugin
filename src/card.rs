@@ -39,6 +39,8 @@ pub enum Card {
     Joker(Option<(Suit, u8)>),
 }
 
+const CARD_CHARACTERS: &'static str = "🂠🂡🂢🂣🂤🂥🂦🂧🂨🂩🂪🂫🂭🂮🂱🂲🂳🂴🂵🂶🂷🂸🂹🂺🂻🂽🂾🃁🃂🃃🃄🃅🃆🃇🃈🃉🃊🃋🃍🃎🃑🃒🃓🃔🃕🃖🃗🃘🃙🃚🃛🃝🃞🃟";
+
 impl Card {
     /// if joker, returns unsuited
     pub fn suit(&self) -> Suit {
@@ -54,6 +56,23 @@ impl Card {
             Card::Number(_, n) => Some(*n),
             Card::Joker(Some((_, n))) => Some(*n),
             Card::Joker(None) => None,
+        }
+    }
+
+    pub fn char(&self) -> char {
+        match self {
+            Card::Number(s, n) => {
+                let offset: usize = match s {
+                    Suit::Spade => 0,
+                    Suit::Heart => 1,
+                    Suit::Diamond => 2,
+                    Suit::Clover => 3,
+                    Suit::UnSuited => 0,
+                } * 13;
+                let index = 1 + offset + (*n - 1) as usize;
+                CARD_CHARACTERS.chars().nth(index).unwrap()
+            }
+            Card::Joker(_) => CARD_CHARACTERS.chars().last().unwrap(),
         }
     }
 }

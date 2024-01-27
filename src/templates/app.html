@@ -1,4 +1,8 @@
 <button class="p-2" phx-click="reset">reset</button>
+<button class="p-2" phx-click="distribute">distribute</button>
 
-<button class="p-2 text-white bg-blue-500" phx-click="serve">serve</button>
-<p>{{ game.count }}</p>
+<div>
+{% for card in hands %}
+    <span>{{ card }}</span>
+{% endfor %}
+</div>

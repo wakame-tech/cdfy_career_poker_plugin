@@ -1,21 +1,17 @@
+use crate::{
+    game::Action,
+    plugin::{GameConfig, LiveEvent, RenderConfig},
+};
+use anyhow::Result;
+use extism_pdk::*;
 use game::Game;
 
 pub mod card;
 pub mod deck;
 pub mod effect;
-// pub mod state;
-
-use crate::{
-    game::Action,
-    plugin::{GameConfig, LiveEvent},
-};
-use extism_pdk::*;
-use tera::Tera;
-
 mod game;
+mod game_view;
 mod plugin;
-
-static APP_HTML: &[u8] = include_bytes!("templates/app.html");
 
 impl ToBytes<'_> for Game {
     type Bytes = Vec<u8>;
@@ -32,18 +28,16 @@ impl FromBytesOwned for Game {
 }
 
 #[plugin_fn]
-pub fn init_game(Json(_): Json<GameConfig>) -> FnResult<()> {
-    let game = Game::default();
+pub fn init_game(Json(config): Json<GameConfig>) -> FnResult<()> {
+    let game = Game::new(config.player_ids);
     var::set("game", &game)?;
     Ok(())
 }
 
 // debug
 #[plugin_fn]
-pub fn get_state(_: ()) -> FnResult<String> {
-    Ok(var::get("game")?
-        .map(|s: Game| serde_json::to_string(&s).unwrap())
-        .unwrap_or("nil".to_string()))
+pub fn get_state(_: ()) -> FnResult<Option<Game>> {
+    Ok(var::get("game")?)
 }
 
 #[plugin_fn]
@@ -56,13 +50,8 @@ pub fn handle_event(Json(event): Json<LiveEvent>) -> FnResult<()> {
 }
 
 #[plugin_fn]
-pub fn render(_: ()) -> FnResult<String> {
+pub fn render(Json(config): Json<RenderConfig>) -> FnResult<String> {
     let game: Game = var::get("game")?.unwrap();
-    let mut context = tera::Context::new();
-    context.insert("game", &game);
-    Ok(Tera::one_off(
-        std::str::from_utf8(APP_HTML).unwrap(),
-        &context,
-        false,
-    )?)
+    let html = game_view::render_game(&game, &config)?;
+    Ok(html)
 }
