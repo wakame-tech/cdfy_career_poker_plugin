@@ -2,7 +2,9 @@
 <button class="p-2" phx-click="distribute">distribute</button>
 
 <div>
-{% for card in hands %}
-    <span>{{ card }}</span>
-{% endfor %}
+    {% for card in hands %}
+    <span class="leading-4 text-xl" phx-click="select" phx-value-field="hands" phx-value-card="{{ card[1] }}">
+        {{card[0]}}
+    </span>
+    {% endfor %}
 </div>

@@ -1,91 +1,68 @@
-use crate::card::{Card, Suit};
+use crate::card::{card_ord, Card, Suit};
+use anyhow::{anyhow, Result};
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashSet,
-    fmt::{Display, Formatter},
-};
+use std::{cmp::Ordering, collections::HashSet};
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub enum DeckStyle {
-    Arrange,
-    Stack,
+pub struct Deck(pub Vec<Card>);
+
+impl From<Vec<Card>> for Deck {
+    fn from(cards: Vec<Card>) -> Self {
+        Self(cards)
+    }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct Deck {
-    pub style: DeckStyle,
-    pub cards: Vec<Card>,
-}
+impl Deck {
+    pub fn shuffle(&mut self) {
+        let mut rng = rand::thread_rng();
+        self.0.shuffle(&mut rng);
+    }
 
-impl Display for Deck {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        if self.cards.is_empty() {
-            write!(f, "(empty)")
-        } else {
-            write!(
-                f,
-                "[{}]",
-                self.cards
-                    .iter()
-                    .map(|e| e.to_string())
-                    .collect::<Vec<_>>()
-                    .join(",")
-            )
+    pub fn sort<F>(&mut self, ord: F)
+    where
+        F: Fn(&Card, &Card) -> Ordering,
+    {
+        self.0.sort_by(ord);
+    }
+
+    pub fn all(jokers: usize) -> Self {
+        let mut cards = vec![];
+        for suit in Suit::suits().iter() {
+            for number in 1u8..=13 {
+                cards.push(Card::Number(suit.clone(), number))
+            }
         }
-    }
-}
-
-pub fn with_jokers(jokers: usize) -> Vec<Card> {
-    let mut rng = rand::thread_rng();
-    let mut cards = vec![];
-    for suit in Suit::suits().iter() {
-        for number in 1u8..=13 {
-            cards.push(Card::Number(suit.clone(), number))
+        for _ in 0..jokers {
+            cards.push(Card::Joker(None))
         }
+        Self(cards)
     }
-    for _ in 0..jokers {
-        cards.push(Card::Joker(None))
+
+    pub fn new(cards: Vec<Card>) -> Self {
+        Self(cards)
     }
-    cards.shuffle(&mut rng);
-    cards
+
+    pub fn split(&self, n: usize) -> Result<Vec<Self>> {
+        let mut decks = vec![];
+        for _ in 0..n {
+            decks.push(Deck::new(vec![]));
+        }
+        for (i, card) in self.0.iter().enumerate() {
+            decks[i % n].0.push(card.clone());
+        }
+        Ok(decks)
+    }
+
+    pub fn remove(&mut self, cards: &[Card]) -> Result<()> {
+        remove_items(&mut self.0, cards)
+    }
 }
 
-pub fn is_same_number(cards: &Vec<Card>) -> bool {
-    let numbers: HashSet<_> = cards.iter().filter_map(|c| c.number()).collect();
-    // if only jokers, len == 0
-    numbers.len() <= 1
-}
-
-pub fn numbers(cards: &Vec<Card>) -> HashSet<u8> {
-    cards
-        .iter()
-        .filter_map(|c| c.number())
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect::<HashSet<_>>()
-}
-
-/// returns cards number, if only jokers, returns 14
-pub fn number(cards: &Vec<Card>) -> u8 {
-    numbers(cards).into_iter().next().unwrap_or(14)
-}
-
-pub fn suits(cards: &Vec<Card>) -> HashSet<Suit> {
-    cards
-        .iter()
-        .map(|c| c.suit())
-        .filter(|s| s != &Suit::UnSuited)
-        .collect::<HashSet<_>>()
-}
-
-/// `other` contains all suits of `self`
-pub fn match_suits(lhs: &Vec<Card>, rhs: &Vec<Card>) -> bool {
-    let (lhs, rhs) = (suits(lhs), suits(rhs));
-    rhs.is_superset(&lhs)
-}
-
-pub fn remove_items<T: Eq + Clone>(items: &mut Vec<T>, removes: &Vec<T>) {
+fn remove_items<T: Eq + Clone>(items: &mut Vec<T>, removes: &[T]) -> Result<()> {
+    if removes.iter().any(|i| !items.contains(&i)) {
+        return Err(anyhow!("remove items not in items"));
+    }
     let indices = removes
         .iter()
         .map(|c| items.iter().position(|h| h == c))
@@ -97,13 +74,20 @@ pub fn remove_items<T: Eq + Clone>(items: &mut Vec<T>, removes: &Vec<T>) {
         .filter(|(i, _)| !indices.contains(i))
         .map(|(_, c)| c.clone())
         .collect();
+    Ok(())
 }
 
-impl Deck {
-    pub fn new(cards: Vec<Card>) -> Self {
-        Self {
-            style: DeckStyle::Arrange,
-            cards,
-        }
-    }
+fn vec_ord<T, F>(l: impl Iterator<Item = T>, r: impl Iterator<Item = T>, ord: F) -> Ordering
+where
+    F: Fn(T, T) -> Ordering,
+{
+    let orderings = l.zip(r).map(|(a, b)| ord(a, b)).collect::<HashSet<_>>();
+    orderings.into_iter().next().unwrap_or(Ordering::Equal)
+}
+
+pub fn deck_ord(lhs: &[Card], rhs: &[Card]) -> Ordering {
+    let (mut lhs, mut rhs) = (lhs.to_vec(), rhs.to_vec());
+    lhs.sort_by(|a, b| card_ord(a, b));
+    rhs.sort_by(|a, b| card_ord(a, b));
+    vec_ord(lhs.iter(), rhs.iter(), card_ord)
 }

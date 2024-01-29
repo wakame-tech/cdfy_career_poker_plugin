@@ -1,5 +1,6 @@
+use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
-use std::fmt::Display;
+use std::{cmp::Ordering, collections::HashSet, fmt::Display};
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Suit {
@@ -77,29 +78,31 @@ impl Card {
     }
 }
 
-impl From<&str> for Card {
+impl TryFrom<&str> for Card {
+    type Error = anyhow::Error;
+
     // A-K,shdc
-    fn from(e: &str) -> Self {
+    fn try_from(e: &str) -> Result<Self> {
         if e == "joker" {
-            return Card::Joker(None);
+            return Ok(Card::Joker(None));
         }
         let chars = e.chars().collect::<Vec<char>>();
         let n: u8 = match chars[0] {
-            'A' => 1,
-            'T' => 10,
-            'J' => 11,
-            'Q' => 12,
-            'K' => 13,
-            n => n.to_string().parse().unwrap(),
-        };
+            'A' => Ok(1),
+            'T' => Ok(10),
+            'J' => Ok(11),
+            'Q' => Ok(12),
+            'K' => Ok(13),
+            n => n.to_string().parse(),
+        }?;
         let s = match chars[1] {
-            'h' => Suit::Heart,
-            'd' => Suit::Diamond,
-            'c' => Suit::Clover,
-            's' => Suit::Spade,
-            _ => panic!(),
-        };
-        Card::Number(s, n)
+            'h' => Ok(Suit::Heart),
+            'd' => Ok(Suit::Diamond),
+            'c' => Ok(Suit::Clover),
+            's' => Ok(Suit::Spade),
+            _ => Err(anyhow!("invalid suit")),
+        }?;
+        Ok(Card::Number(s, n))
     }
 }
 
@@ -120,5 +123,53 @@ impl Display for Card {
             Card::Joker(None) => write!(f, "joker"),
             Card::Joker(Some((suit, number))) => write!(f, "joker(as {}{})", s(*number), suit),
         }
+    }
+}
+
+pub fn is_same_number(cards: &[Card]) -> bool {
+    let numbers: HashSet<_> = cards.iter().filter_map(|c| c.number()).collect();
+    // if only jokers, len == 0
+    numbers.len() <= 1
+}
+
+pub fn numbers(cards: &[Card]) -> HashSet<u8> {
+    cards
+        .iter()
+        .filter_map(|c| c.number())
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect::<HashSet<_>>()
+}
+
+/// returns cards number, if only jokers, returns 14
+pub fn number(cards: &[Card]) -> u8 {
+    numbers(cards).into_iter().next().unwrap_or(14)
+}
+
+pub fn suits(cards: &[Card]) -> HashSet<Suit> {
+    cards
+        .iter()
+        .map(|c| c.suit())
+        .filter(|s| s != &Suit::UnSuited)
+        .collect::<HashSet<_>>()
+}
+
+/// `other` contains all suits of `self`
+pub fn match_suits(lhs: &[Card], rhs: &[Card]) -> bool {
+    let (lhs, rhs) = (suits(lhs), suits(rhs));
+    rhs.is_superset(&lhs)
+}
+
+pub fn cardinal(n: u8) -> i32 {
+    ((n + 10) % 13).into()
+}
+
+pub fn card_ord(l: &Card, r: &Card) -> Ordering {
+    let (ln, rn) = (l.number(), r.number());
+    match (ln, rn) {
+        (None, None) => Ordering::Less,
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (Some(i), Some(j)) => cardinal(i).cmp(&cardinal(j)),
     }
 }

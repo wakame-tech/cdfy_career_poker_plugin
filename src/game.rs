@@ -1,57 +1,140 @@
 use crate::{
-    card::Card,
-    deck::{is_same_number, match_suits, number, remove_items, with_jokers, Deck, DeckStyle},
-    effect::{effect_card, effect_one_chance, servable_9, Effect},
+    card::{card_ord, cardinal, is_same_number, match_suits, number, suits, Card, Suit},
+    deck::{deck_ord, Deck},
     plugin::LiveEvent,
 };
 use anyhow::{anyhow, Result};
-use rand::Rng;
 use serde::{Deserialize, Serialize};
-use std::{
-    cmp::Ordering,
-    collections::{HashMap, HashSet},
-};
+use std::collections::{HashMap, HashSet};
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum PromptKind {
+    Select4,
+    Select7,
+    Select13,
+    OneChance,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct Prompt {
+    pub kind: PromptKind,
+    pub player_ids: Vec<String>,
+    pub question: String,
+    pub options: Vec<String>,
+}
+
+impl Prompt {
+    pub fn select_4(player_id: &str) -> Self {
+        Self {
+            kind: PromptKind::Select4,
+            player_ids: vec![player_id.to_string()],
+            question: "select cards from trushes".to_string(),
+            options: vec!["ok".to_string()],
+        }
+    }
+
+    pub fn select_7(player_id: &str) -> Self {
+        Self {
+            kind: PromptKind::Select7,
+            player_ids: vec![player_id.to_string()],
+            question: "select cards from hands".to_string(),
+            options: vec!["ok".to_string()],
+        }
+    }
+
+    pub fn select_13(player_id: &str) -> Self {
+        Self {
+            kind: PromptKind::Select13,
+            player_ids: vec![player_id.to_string()],
+            question: "select cards from excluded".to_string(),
+            options: vec!["ok".to_string()],
+        }
+    }
+
+    pub fn one_chance(player_ids: Vec<String>) -> Self {
+        Self {
+            kind: PromptKind::OneChance,
+            player_ids,
+            question: "select A if use one chance".to_string(),
+            options: vec!["ok".to_string()],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Effect {
+    pub river_size: Option<usize>,
+    pub suit_limits: HashSet<Suit>,
+    /// a number includes `effect_limits` ignore effect
+    pub effect_limits: HashSet<u8>,
+    /// card strength is reversed until the river is reset
+    pub turn_revoluted: bool,
+    /// when `is_step` is true, delta of previous cards number must be 1
+    pub is_step: bool,
+    /// 5
+    pub skip: bool,
+    /// when `revoluted` is true, card strength is reversed
+    pub revoluted: bool,
+}
+
+impl Effect {
+    pub fn new() -> Self {
+        Self {
+            river_size: None,
+            suit_limits: HashSet::new(),
+            effect_limits: HashSet::new(),
+            turn_revoluted: false,
+            is_step: false,
+            skip: false,
+            revoluted: false,
+        }
+    }
+
+    pub fn new_turn(effect: Effect) -> Self {
+        Self {
+            river_size: None,
+            suit_limits: HashSet::new(),
+            effect_limits: HashSet::new(),
+            turn_revoluted: false,
+            is_step: false,
+            ..effect
+        }
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Game {
     pub players: Vec<String>,
+    pub selects: HashMap<String, Vec<Card>>,
+    pub prompt: Option<(Prompt, HashMap<String, Option<String>>)>,
     pub current: Option<String>,
-    pub river: Vec<Deck>,
-    pub will_flush_task_id: Option<String>,
     pub last_served_player_id: Option<String>,
+
+    pub river: Vec<Vec<Card>>,
     /// players deck + trushes + excluded
     pub fields: HashMap<String, Deck>,
     pub effect: Effect,
-    /// pair of user id to deck id for prompt cards
-    pub prompts: HashMap<String, String>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum Action {
     Reset,
     Distribute,
-    Pass {
-        player_id: String,
-    },
-    Flush {
-        to: String,
-    },
-    OneChance {
-        player_id: String,
-        serves: Vec<Card>,
-    },
     Select {
-        from: String,
+        field: String,
         player_id: String,
-        serves: Vec<Card>,
+        card: Card,
     },
-    ServeAnother {
+    Answer {
         player_id: String,
-        serves: Vec<Card>,
+        answer: String,
     },
     Serve {
         player_id: String,
-        serves: Vec<Card>,
+        field: String,
+    },
+    Pass {
+        player_id: String,
     },
 }
 
@@ -63,18 +146,43 @@ impl Action {
         if event.event_name == "distribute" {
             return Ok(Action::Distribute);
         }
+        if event.event_name == "select" {
+            return Ok(Action::Select {
+                field: event.value.get("field").unwrap().clone(),
+                player_id: event.player_id.clone(),
+                card: Card::try_from(event.value.get("card").unwrap().as_str())?,
+            });
+        }
+        if event.event_name == "answer" {
+            return Ok(Action::Answer {
+                player_id: event.player_id.clone(),
+                answer: event.value.get("answer").unwrap().to_string(),
+            });
+        }
         Err(anyhow!("invalid event"))
     }
 }
 
-pub fn will_flush(player_id: String, to: String) -> String {
-    todo!()
-    // reserve(
-    //     player_id,
-    //     room_id,
-    //     serde_json::to_string(&Action::Flush { to }).unwrap(),
-    //     5000,
-    // )
+impl Game {
+    pub fn deck_mut(&mut self, id: &str) -> Result<&mut Deck> {
+        let Some(deck) = self.fields.get_mut(id) else {
+            return Err(anyhow!("field {} not found", id));
+        };
+        Ok(deck)
+    }
+
+    pub fn deck(&self, id: &str) -> Result<&Deck> {
+        let Some(deck) = self.fields.get(id) else {
+            return Err(anyhow!("field {} not found", id));
+        };
+        Ok(deck)
+    }
+
+    pub fn transfer(&mut self, from: &str, to: &str, cards: Vec<Card>) -> Result<()> {
+        self.deck_mut(from)?.remove(&cards)?;
+        self.deck_mut(to)?.0.extend(cards.to_vec());
+        Ok(())
+    }
 }
 
 impl Game {
@@ -90,226 +198,259 @@ impl Game {
         fields.extend(player_decks);
 
         Self {
-            players: player_ids,
+            players: player_ids.clone(),
+            prompt: None,
+            selects: HashMap::from_iter(player_ids.iter().map(|id| (id.to_string(), Vec::new()))),
             river: vec![],
-            will_flush_task_id: None,
             last_served_player_id: None,
             current: None,
             fields,
             effect: Effect::new(),
-            prompts: HashMap::new(),
         }
+    }
+
+    fn active_player_ids(&self) -> Vec<String> {
+        self.fields
+            .iter()
+            .filter(|(_, deck)| !deck.0.is_empty())
+            .map(|(id, _)| id.clone())
+            .collect()
     }
 
     pub fn apply_action(&mut self, action: Action) -> Result<()> {
         match action {
+            // game actions
             Action::Reset => {
                 *self = Self::new(self.players.clone());
                 Ok(())
             }
-            Action::Distribute => self.distribute(),
-            Action::Pass { player_id } => self.pass(player_id),
-            Action::Flush { to } => self.flush(to),
-            Action::OneChance { player_id, serves } => self.one_chance(player_id, serves),
+            Action::Distribute => {
+                if self.players.is_empty() {
+                    return Err(anyhow!("players is empty"));
+                }
+                let mut deck = Deck::all(2);
+                deck.shuffle();
+                let mut decks = deck.split(self.players.len())?;
+                for (i, player_id) in self.players.iter().enumerate() {
+                    decks[i].sort(card_ord);
+                    self.fields.insert(player_id.to_string(), decks[i].clone());
+                }
+                self.current = Some(self.players[0].clone());
+                Ok(())
+            }
+            // player actions
             Action::Select {
-                from,
-                player_id,
-                serves,
-            } => match from.as_str() {
-                "trushes" => self.select_trushes(player_id, serves),
-                "excluded" => self.select_excluded(player_id, serves),
-                _ => Err(anyhow!("field {} not found", from)),
-            },
-            Action::ServeAnother { player_id, serves } => self.select_passes(player_id, serves),
-            Action::Serve { player_id, serves } => self.serve(player_id, serves),
-        }
-    }
+                player_id, card, ..
+            } => {
+                self.toggle_select(&player_id, card);
+                Ok(())
+            }
+            Action::Answer { player_id, answer } => {
+                if let Some((prompt, answers)) = &mut self.prompt {
+                    answers.insert(player_id.clone(), Some(answer));
 
-    pub fn cancel_task(&mut self, task_id: String) {
-        todo!()
-    }
-
-    fn deck_mut(&mut self, id: &str) -> Result<&mut Deck> {
-        let Some(deck) = self.fields.get_mut(id) else {
-            return Err(anyhow!("field {} not found", id));
-        };
-        Ok(deck)
-    }
-
-    fn deck(&self, id: &str) -> Result<&Deck> {
-        let Some(deck) = self.fields.get(id) else {
-            return Err(anyhow!("field {} not found", id));
-        };
-        Ok(deck)
-    }
-
-    fn distribute(&mut self) -> Result<()> {
-        if self.players.is_empty() {
-            return Err(anyhow!("players is empty"));
-        }
-        let cards = with_jokers(2);
-        for player_id in self.players.iter() {
-            self.fields.insert(
-                player_id.to_string(),
-                Deck {
-                    cards: vec![],
-                    style: DeckStyle::Arrange,
-                },
-            );
-        }
-
-        for (i, card) in cards.into_iter().enumerate() {
-            let player_id = &self.players[i % self.players.len()];
-            if let Some(hand) = self.fields.get_mut(player_id) {
-                hand.cards.push(card);
+                    // check all players answers
+                    if prompt.player_ids == answers.keys().cloned().collect::<Vec<_>>() {
+                        match prompt.kind {
+                            PromptKind::Select4 => {
+                                let cards = self.selects.get(&player_id).unwrap().clone();
+                                self.transfer("trushes", &player_id, cards)?;
+                                self.on_end_turn(&player_id)?;
+                            }
+                            PromptKind::Select7 => {
+                                let cards = self.selects.get(&player_id).unwrap().clone();
+                                let passer = self.get_relative_player(&player_id, -1).unwrap();
+                                self.transfer(&player_id, &passer, cards)?;
+                                self.on_end_turn(&player_id)?;
+                            }
+                            PromptKind::Select13 => {
+                                let cards = self.selects.get(&player_id).unwrap().clone();
+                                self.transfer("excluded", &player_id, cards)?;
+                            }
+                            PromptKind::OneChance => {
+                                let player_id = self.current.clone().unwrap();
+                                let serves = self.selects.get(&player_id).unwrap().clone();
+                                self.effect_card(&player_id, serves)?;
+                                self.on_end_turn(&player_id)?;
+                            }
+                        }
+                    }
+                }
+                Ok(())
+            }
+            Action::Pass { player_id } => {
+                if self.river.is_empty() {
+                    return Err(anyhow!("cannot pass because river is empty"));
+                }
+                self.on_end_turn(&player_id)?;
+                Ok(())
+            }
+            Action::Serve { player_id, .. } => {
+                let serves = self.selects.get(&player_id).unwrap().clone();
+                if serves.is_empty() || !self.servable(&serves) {
+                    return Err(anyhow!("not servable"));
+                }
+                self.deck_mut(&player_id)?.remove(&serves)?;
+                self.prompt_one_chance(&player_id);
+                Ok(())
             }
         }
-        for player_id in self.players.iter() {
-            if let Some(hand) = self.fields.get_mut(player_id) {
-                hand.cards.sort_by(|a, b| card_ord(a, b))
-            }
+    }
+
+    fn toggle_select(&mut self, player_id: &str, card: Card) {
+        if self.selects.get(player_id).unwrap().contains(&card) {
+            let index = self
+                .selects
+                .get(player_id)
+                .unwrap()
+                .iter()
+                .position(|c| c == &card)
+                .unwrap();
+            self.selects.get_mut(player_id).unwrap().remove(index);
+        } else {
+            self.selects.get_mut(player_id).unwrap().push(card);
         }
-        self.current = Some(self.players[0].clone());
-        Ok(())
     }
 
     pub fn get_relative_player(&self, player_id: &str, d: i32) -> Option<String> {
-        let player_index = self.players.iter().position(|id| id == &player_id).unwrap();
-        let mut delta: i32 = d;
-        loop {
-            let index =
-                ((player_index as i32 + delta).rem_euclid(self.players.len() as i32)) as usize;
-            if let Some(hand) = self.fields.get(&self.players[index]) {
-                if !hand.cards.is_empty() {
-                    return Some(self.players[index].clone());
-                }
-            }
-            if delta as usize == self.players.len() {
-                return None;
-            }
-            delta += 1;
-        }
+        let index = self.players.iter().position(|id| id == &player_id).unwrap();
+        let index = ((index as i32 + d).rem_euclid(self.active_player_ids().len() as i32)) as usize;
+        Some(self.active_player_ids()[index].clone())
     }
 
-    pub fn will_flush(&mut self, player_id: &str, to: &str) {
-        self.will_flush_task_id = Some(will_flush(player_id.to_string(), to.to_string()));
-    }
-
-    pub fn flush(&mut self, to: String) -> Result<()> {
-        let cards = self
-            .river
-            .iter()
-            .map(|d| d.cards.clone())
-            .flatten()
-            .collect::<Vec<_>>();
-        let Some(deck) = self.fields.get_mut(to.as_str()) else {
-            return Err(anyhow!("field {} not found", to));
-        };
-        deck.cards.extend(cards);
-        self.effect = Effect::new_turn(self.effect.clone());
+    fn flush_river(&mut self, to: &str) -> Result<()> {
+        let cards = self.river.iter().flatten().cloned().collect::<Vec<_>>();
+        self.deck_mut(to)?.0.extend(cards);
         self.river.clear();
+        Ok(())
+    }
+
+    pub fn flush(&mut self, to: &str) -> Result<()> {
+        self.flush_river(to)?;
+        self.effect = Effect::new_turn(self.effect.clone());
         self.current = self.last_served_player_id.clone();
         Ok(())
     }
 
-    pub fn next(&mut self, player_id: &str) {
-        self.current = self.get_relative_player(&player_id, 1);
-        if self.current == self.last_served_player_id || self.current.is_none() {
-            self.will_flush(player_id, "trushes");
+    pub fn prompt_one_chance(&mut self, player_id: &str) {
+        let player_ids = self
+            .active_player_ids()
+            .iter()
+            .filter(|id| id != &&player_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        self.prompt = Some((Prompt::one_chance(player_ids), HashMap::new()));
+    }
+
+    pub fn effect_card(&mut self, player_id: &str, serves: Vec<Card>) -> Result<()> {
+        self.effect.river_size = Some(serves.len());
+
+        if serves.len() == 4 {
+            self.effect.revoluted = !self.effect.revoluted;
         }
-    }
 
-    fn pass(&mut self, player_id: String) -> Result<()> {
-        if self.river.is_empty() {
-            return Err(anyhow!("cannot pass because river is empty"));
-        }
-        self.next(&player_id);
-        Ok(())
-    }
+        self.river.push(serves.to_vec());
+        self.effect.river_size = Some(serves.len());
 
-    fn transfer(&mut self, from_deck_id: &str, to_deck_id: &str, cards: &Vec<Card>) -> Result<()> {
-        let from_deck = self.deck_mut(from_deck_id)?;
-        remove_items(&mut from_deck.cards, &cards);
-        let to_deck = self.deck_mut(to_deck_id)?;
-        to_deck.cards.extend(cards.clone());
-        Ok(())
-    }
+        let n = number(&serves);
 
-    fn select_trushes(&mut self, player_id: String, serves: Vec<Card>) -> Result<()> {
-        let Some(lasts) = self.river.last() else {
-            return Err(anyhow!("river is empty"));
+        let hands = self.deck(player_id)?;
+        match n {
+            3 => self.effect.effect_limits.extend(1..=13),
+            4 => {
+                let trushes = self.deck("trushes")?;
+                if hands.0.is_empty() || trushes.0.is_empty() {
+                    return Ok(());
+                }
+                self.prompt = Some((Prompt::select_4(player_id), HashMap::new()));
+            }
+            5 => {
+                self.effect.skip = true;
+            }
+            6 => {}
+            7 => {
+                if !hands.0.is_empty() {
+                    self.prompt = Some((Prompt::select_7(player_id), HashMap::new()));
+                }
+            }
+            8 => {}
+            9 => {
+                self.effect.river_size = match self.effect.river_size {
+                    Some(1) => Some(3),
+                    Some(3) => Some(1),
+                    n => n,
+                };
+            }
+            10 => {
+                self.effect.effect_limits.extend(1..10);
+            }
+            11 => {
+                self.effect.turn_revoluted = true;
+            }
+            12 => {
+                self.effect.is_step = true;
+                self.effect.suit_limits.extend(suits(&serves));
+            }
+            13 => {
+                let excluded = self.deck("excluded")?;
+                if hands.0.is_empty() || excluded.0.is_empty() {
+                    return Ok(());
+                }
+                self.prompt = Some((Prompt::select_13(player_id), HashMap::new()));
+            }
+            // TODO
+            1 => {}
+            2 => {}
+            _ => {
+                return Err(anyhow!("invalid number {}", n));
+            }
         };
-        let n = self.deck("trushes")?.cards.len().min(lasts.cards.len());
-        if n != serves.len() {
-            return Err(anyhow!("invalid serves size"));
-        }
-        self.transfer("trushes", player_id.as_str(), &serves)?;
-        self.prompts.remove(&player_id);
-        self.next(&player_id);
         Ok(())
     }
 
-    fn select_excluded(&mut self, player_id: String, serves: Vec<Card>) -> Result<()> {
-        let Some(lasts) = self.river.last() else {
-            return Err(anyhow!("river is empty"));
+    fn servable_9(&self, _serves: &[Card]) -> bool {
+        let river_size = self.effect.river_size.unwrap();
+        match river_size {
+            1 | 3 => river_size == 1 || river_size == 3,
+            n => river_size == n,
+        }
+    }
+
+    pub fn servable(&self, serves: &[Card]) -> bool {
+        let mut ok = is_same_number(serves);
+        let Some(top) = self.river.last() else {
+            // river is empty
+            return ok;
         };
-        let n = self.deck("trushes")?.cards.len().min(lasts.cards.len());
-        if n != serves.len() {
-            return Err(anyhow!("invalid serves size"));
-        }
-        self.transfer("excluded", player_id.as_str(), &serves)?;
-        self.prompts.remove(&player_id);
-        self.next(&player_id);
-        Ok(())
-    }
-
-    fn select_passes(&mut self, player_id: String, serves: Vec<Card>) -> Result<()> {
-        let Some(lasts) = self.river.last() else {
-            return Err(anyhow!("river is empty"));
+        let river_size = self.effect.river_size.unwrap();
+        // check ordering
+        let ordering = if self.effect.revoluted ^ self.effect.turn_revoluted {
+            deck_ord(&top, serves).reverse()
+        } else {
+            deck_ord(&top, serves)
         };
-        let n = self.deck(&player_id)?.cards.len().min(lasts.cards.len());
-        if n != serves.len() {
-            return Err(anyhow!("invalid serves size"));
+        ok = ok && ordering.is_lt();
+
+        // check river size
+        ok = ok
+            && match number(serves) {
+                9 if !self.effect.effect_limits.contains(&9) => self.servable_9(serves),
+                _ => serves.len() == river_size,
+            };
+        // check steps
+        if self.effect.is_step {
+            ok = ok && cardinal(number(serves)) - cardinal(number(&top)) == 1;
         }
-        let left_id = self.get_relative_player(&player_id, -1).unwrap();
-        self.transfer(&player_id, &left_id, &serves)?;
-        self.prompts.remove(&player_id);
-        self.next(&player_id);
-        Ok(())
+        // check suits
+        if !self.effect.suit_limits.is_empty() {
+            ok = ok && match_suits(&top, serves);
+        }
+        ok
     }
 
-    fn one_chance(&mut self, player_id: String, serves: Vec<Card>) -> Result<()> {
+    fn on_end_turn(&mut self, player_id: &str) -> Result<()> {
         let hand = self.deck(&player_id)?;
-        // cannot move up a game using OneChance
-        if self.effect.effect_limits.contains(&1) || hand.cards == serves {
-            return Err(anyhow!("cannot move up a game using OneChance"));
-        }
-        self.transfer(&player_id, "trushes", &serves)?;
-
-        // FIXME: use a result of janken subgame
-        let active_players = self
-            .fields
-            .values()
-            .filter(|hand| !hand.cards.is_empty())
-            .count();
-        let mut rng = rand::thread_rng();
-        if rng.gen_range(0..active_players) != 0 {
-            return Ok(());
-        }
-        effect_one_chance(self, &player_id, &serves);
-        Ok(())
-    }
-
-    fn serve(&mut self, player_id: String, serves: Vec<Card>) -> Result<()> {
-        if serves.is_empty() || !servable(&self, &serves) {
-            return Err(anyhow!("not servable"));
-        }
-        let hand = self.deck_mut(&player_id)?;
-        remove_items(&mut hand.cards, &serves);
-        effect_card(self, &player_id, &serves);
-
-        let hand = self.deck(&player_id)?;
-        if hand.cards.is_empty() {
+        if hand.0.is_empty() {
             self.last_served_player_id = self.get_relative_player(&player_id, 1);
         } else {
             self.last_served_player_id = self.get_relative_player(&player_id, 0);
@@ -317,150 +458,21 @@ impl Game {
         if self.last_served_player_id.is_none() {
             return Err(anyhow!("end"));
         }
+
+        // flush
+        if self.current == self.last_served_player_id || self.current.is_none() {
+            let to = if let Some(top) = self.river.last() {
+                let n = number(top);
+                if n == 2 && !self.effect.effect_limits.contains(&2) {
+                    "excluded"
+                } else {
+                    "trushes"
+                }
+            } else {
+                "trushes"
+            };
+            self.flush(to)?;
+        }
         Ok(())
-    }
-}
-
-pub fn cardinal(n: u8) -> i32 {
-    ((n + 10) % 13).into()
-}
-
-pub fn card_ord(l: &Card, r: &Card) -> Ordering {
-    let (ln, rn) = (l.number(), r.number());
-    match (ln, rn) {
-        (None, None) => Ordering::Less,
-        (Some(_), None) => Ordering::Less,
-        (None, Some(_)) => Ordering::Greater,
-        (Some(i), Some(j)) => cardinal(i).cmp(&cardinal(j)),
-    }
-}
-
-fn vec_ord<T, F>(l: impl Iterator<Item = T>, r: impl Iterator<Item = T>, ord: F) -> Ordering
-where
-    F: Fn(T, T) -> Ordering,
-{
-    let orderings = l.zip(r).map(|(a, b)| ord(a, b)).collect::<HashSet<_>>();
-    orderings.into_iter().next().unwrap_or(Ordering::Equal)
-}
-
-fn deck_ord(lhs: &Vec<Card>, rhs: &Vec<Card>) -> Ordering {
-    let (mut lhs, mut rhs) = (lhs.clone(), rhs.clone());
-    lhs.sort_by(|a, b| card_ord(a, b));
-    rhs.sort_by(|a, b| card_ord(a, b));
-    vec_ord(lhs.iter(), rhs.iter(), card_ord)
-}
-
-pub fn servable(state: &Game, serves: &Vec<Card>) -> bool {
-    let mut ok = is_same_number(serves);
-    let Some(lasts) = state.river.last() else {
-        // river is empty
-        return ok;
-    };
-    let river_size = state.effect.river_size.unwrap();
-    // check ordering
-    let ordering = if state.effect.revoluted ^ state.effect.turn_revoluted {
-        deck_ord(&lasts.cards, serves).reverse()
-    } else {
-        deck_ord(&lasts.cards, serves)
-    };
-    ok = ok && ordering.is_lt();
-
-    // check river size
-    ok = ok
-        && match number(serves) {
-            9 if !state.effect.effect_limits.contains(&9) => servable_9(state, serves),
-            _ => serves.len() == river_size,
-        };
-    // check steps
-    if state.effect.is_step {
-        ok = ok && cardinal(number(serves)) - cardinal(number(&lasts.cards)) == 1;
-    }
-    // check suits
-    if !state.effect.suit_limits.is_empty() {
-        ok = ok && match_suits(&lasts.cards, serves);
-    }
-    ok
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::{
-        deck::Deck,
-        game::{servable, Action, Game},
-    };
-    use std::collections::HashMap;
-
-    #[test]
-    fn test_servable() {
-        let mut state = Game::new(vec![]);
-        let serves = vec!["3h".into(), "3d".into()];
-        assert_eq!(servable(&state, &serves), true);
-
-        state.effect.river_size = Some(1);
-        state.river.push(Deck::new(vec!["Kh".into()]));
-
-        let serves = vec!["Ah".into()];
-        assert_eq!(servable(&state, &serves), true);
-    }
-
-    #[test]
-    fn test_get_relative_player() {
-        let mut state = Game::new(vec![]);
-        state.fields = HashMap::from_iter(vec![
-            ("a".to_string(), Deck::new(vec!["Ah".into()])),
-            ("b".to_string(), Deck::new(vec!["Ah".into()])),
-            ("c".to_string(), Deck::new(vec!["Ah".into()])),
-        ]);
-        state.players = vec!["a".to_string(), "b".to_string(), "c".to_string()];
-        assert_eq!(state.get_relative_player("a", 1), Some("b".to_string()));
-        assert_eq!(state.get_relative_player("a", -1), Some("c".to_string()));
-        assert_eq!(state.get_relative_player("a", 2), Some("c".to_string()));
-        assert_eq!(state.get_relative_player("a", 3), Some("a".to_string()));
-
-        let mut state = Game::new(vec![]);
-        state.fields = HashMap::from_iter(vec![
-            ("a".to_string(), Deck::new(vec!["Ah".into()])),
-            ("b".to_string(), Deck::new(vec!["Ah".into()])),
-        ]);
-        state.players = vec!["a".to_string(), "b".to_string()];
-        assert_eq!(state.get_relative_player("a", 1), Some("b".to_string()));
-        assert_eq!(state.get_relative_player("a", -1), Some("b".to_string()));
-        assert_eq!(state.get_relative_player("a", 2), Some("a".to_string()));
-    }
-
-    #[test]
-    fn test_effect_12() {
-        let mut state = Game::new(vec![]);
-        state.fields = HashMap::from_iter(vec![
-            ("a".to_string(), Deck::new(vec!["Ah".into()])),
-            ("b".to_string(), Deck::new(vec!["Ah".into()])),
-        ]);
-        state.players = vec!["a".to_string(), "b".to_string()];
-        state.serve("a".to_string(), vec!["Qh".into()]);
-        println!("{:?}", state.effect);
-        assert_eq!(servable(&state, &vec!["Ks".into()]), false);
-    }
-
-    #[test]
-    fn test_effect_4() {
-        let mut state = Game::new(vec![]);
-        state.fields = HashMap::from_iter(vec![
-            ("a".to_string(), Deck::new(vec![])),
-            ("trushes".to_string(), Deck::new(vec!["Ah".into()])),
-        ]);
-        state.river = vec![Deck::new(vec!["4h".into()])];
-        state.players = vec!["a".to_string(), "b".to_string()];
-        state
-            .action(Action::Select {
-                from: "trushes".to_string(),
-                player_id: "a".to_string(),
-                serves: vec!["Ah".into()],
-            })
-            .unwrap();
-        assert_eq!(state.fields.get("trushes").unwrap(), &Deck::new(vec![]));
-        assert_eq!(
-            state.fields.get("a").unwrap(),
-            &Deck::new(vec!["Ah".into()])
-        );
     }
 }

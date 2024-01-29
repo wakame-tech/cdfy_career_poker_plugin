@@ -8,7 +8,6 @@ use game::Game;
 
 pub mod card;
 pub mod deck;
-pub mod effect;
 mod game;
 mod game_view;
 mod plugin;

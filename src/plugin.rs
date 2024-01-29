@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
@@ -6,18 +8,10 @@ pub struct GameConfig {
 }
 
 #[derive(Deserialize)]
-pub struct CellValue {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cell: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub value: Option<String>,
-}
-
-#[derive(Deserialize)]
 pub struct LiveEvent {
     pub player_id: String,
     pub event_name: String,
-    pub value: CellValue,
+    pub value: HashMap<String, String>,
 }
 
 #[derive(Deserialize)]
