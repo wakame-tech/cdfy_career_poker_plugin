@@ -1,10 +1,64 @@
-<button class="p-2" phx-click="reset">reset</button>
-<button class="p-2" phx-click="distribute">distribute</button>
+<button class="p-2 bg-red-500 text-white rounded" phx-click="reset">reset</button>
+<button class="p-2 bg-blue-500 text-white rounded" phx-click="distribute">distribute</button>
 
-<div>
-    {% for card in hands %}
-    <span class="leading-4 text-xl" phx-click="select" phx-value-field="hands" phx-value-card="{{ card[1] }}">
+<div class="select-none">
+    <p>current: {{ current }}</p>
+
+    {% if show_prompt %}
+    <div class="p-2 border border-1 rounded bg-blue-100">
+        <h3 class="font-bold text-xl">prompt</h3>
+        <p>{{prompt[0].question}}</p>
+        {% for option in prompt[0].options %}
+        <button class="p-2 bg-blue-500 text-white rounded" phx-click="answer" phx-value-option="{{ option }}">
+            {{ option }}</button>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <p>river</p>
+    {% for card in river %}
+    <span class="leading-4 text-4xl">
         {{card[0]}}
     </span>
     {% endfor %}
+
+    <p>trushes</p>
+    {% for card in trushes %}
+    <span class="leading-4 text-4xl" phx-click="select" phx-value-field="trushes" phx-value-card="{{ card[1] }}">
+        {% if card[2] %}
+        <span class="text-4xl text-red-500">{{card[0]}}</span>
+        {% else %}
+        <span class="text-4xl">{{card[0]}}</span>
+        {% endif %}
+    </span>
+    {% endfor %}
+
+    <p>excludes</p>
+    {% for card in excluded %}
+    <span class="leading-4 text-4xl" phx-click="select" phx-value-field="excludes" phx-value-card="{{ card[1] }}">
+        {% if card[2] %}
+        <span class="text-4xl text-red-500">{{card[0]}}</span>
+        {% else %}
+        <span class="text-4xl">{{card[0]}}</span>
+        {% endif %}
+    </span>
+    {% endfor %}
+
+    <p>hands</p>
+    {% for card in hands %}
+    <span class="h-24" phx-click="select" phx-value-field="hands" phx-value-card="{{ card[1] }}">
+        {% if card[2] %}
+        <span class="text-4xl text-red-500">{{card[0]}}</span>
+        {% else %}
+        <span class="text-4xl">{{card[0]}}</span>
+        {% endif %}
+    </span>
+    {% endfor %}
+
+    {% if is_current %}
+    <div>
+        <button class="p-2 bg-blue-500 text-white rounded" phx-click="serve">serve</button>
+        <button class="p-2 bg-blue-500 text-white rounded" phx-click="pass">pass</button>
+    </div>
+    {% endif %}
 </div>

@@ -1,7 +1,6 @@
 use crate::{
     card::{card_ord, cardinal, is_same_number, match_suits, number, suits, Card, Suit},
     deck::{deck_ord, Deck},
-    plugin::LiveEvent,
 };
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
@@ -12,7 +11,7 @@ pub enum PromptKind {
     Select4,
     Select7,
     Select13,
-    OneChance,
+    UseOneChance,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -53,10 +52,10 @@ impl Prompt {
 
     pub fn one_chance(player_ids: Vec<String>) -> Self {
         Self {
-            kind: PromptKind::OneChance,
+            kind: PromptKind::UseOneChance,
             player_ids,
             question: "select A if use one chance".to_string(),
-            options: vec!["ok".to_string()],
+            options: vec!["serve".to_string(), "skip".to_string()],
         }
     }
 }
@@ -71,8 +70,6 @@ pub struct Effect {
     pub turn_revoluted: bool,
     /// when `is_step` is true, delta of previous cards number must be 1
     pub is_step: bool,
-    /// 5
-    pub skip: bool,
     /// when `revoluted` is true, card strength is reversed
     pub revoluted: bool,
 }
@@ -85,7 +82,6 @@ impl Effect {
             effect_limits: HashSet::new(),
             turn_revoluted: false,
             is_step: false,
-            skip: false,
             revoluted: false,
         }
     }
@@ -131,36 +127,10 @@ pub enum Action {
     },
     Serve {
         player_id: String,
-        field: String,
     },
     Pass {
         player_id: String,
     },
-}
-
-impl Action {
-    pub fn from_event(event: &LiveEvent) -> Result<Self> {
-        if event.event_name == "reset" {
-            return Ok(Action::Reset);
-        }
-        if event.event_name == "distribute" {
-            return Ok(Action::Distribute);
-        }
-        if event.event_name == "select" {
-            return Ok(Action::Select {
-                field: event.value.get("field").unwrap().clone(),
-                player_id: event.player_id.clone(),
-                card: Card::try_from(event.value.get("card").unwrap().as_str())?,
-            });
-        }
-        if event.event_name == "answer" {
-            return Ok(Action::Answer {
-                player_id: event.player_id.clone(),
-                answer: event.value.get("answer").unwrap().to_string(),
-            });
-        }
-        Err(anyhow!("invalid event"))
-    }
 }
 
 impl Game {
@@ -210,10 +180,10 @@ impl Game {
     }
 
     fn active_player_ids(&self) -> Vec<String> {
-        self.fields
+        self.players
             .iter()
-            .filter(|(_, deck)| !deck.0.is_empty())
-            .map(|(id, _)| id.clone())
+            .filter(|id| !self.deck(id).unwrap().0.is_empty())
+            .cloned()
             .collect()
     }
 
@@ -247,38 +217,82 @@ impl Game {
             }
             Action::Answer { player_id, answer } => {
                 if let Some((prompt, answers)) = &mut self.prompt {
+                    if !prompt.options.contains(&answer) {
+                        return Err(anyhow!("invalid answer"));
+                    }
+                    // validate answer
+                    match prompt.kind {
+                        PromptKind::Select4 => {
+                            let n_cards = self.river.last().unwrap().len();
+                            if self.selects.get(&player_id).unwrap().len() != n_cards {
+                                return Err(anyhow!("please select {} cards in trushes", n_cards));
+                            }
+                        }
+                        PromptKind::Select7 => {
+                            let n_cards = self.river.last().unwrap().len();
+                            if self.selects.get(&player_id).unwrap().len() != n_cards {
+                                return Err(anyhow!("please select {} cards in hands", n_cards));
+                            }
+                        }
+                        PromptKind::Select13 => {
+                            let n_cards = self.river.last().unwrap().len();
+                            if self.selects.get(&player_id).unwrap().len() != n_cards {
+                                return Err(anyhow!("please select {} cards in excluded", n_cards));
+                            }
+                        }
+                        PromptKind::UseOneChance => {
+                            let serves = self.selects.get(&player_id).unwrap().clone();
+                            if answer == "serve".to_string()
+                                && (serves.len() != 1 || number(&serves) != 1)
+                            {
+                                return Err(anyhow!("please select A"));
+                            }
+                        }
+                    }
                     answers.insert(player_id.clone(), Some(answer));
 
                     // check all players answers
-                    if prompt.player_ids == answers.keys().cloned().collect::<Vec<_>>() {
+                    if prompt.player_ids.iter().collect::<HashSet<_>>()
+                        == answers.keys().collect::<HashSet<_>>()
+                    {
                         match prompt.kind {
                             PromptKind::Select4 => {
                                 let cards = self.selects.get(&player_id).unwrap().clone();
                                 self.transfer("trushes", &player_id, cards)?;
+                                self.deck_mut(&player_id)?.sort(card_ord);
                                 self.on_end_turn(&player_id)?;
                             }
                             PromptKind::Select7 => {
                                 let cards = self.selects.get(&player_id).unwrap().clone();
-                                let passer = self.get_relative_player(&player_id, -1).unwrap();
+                                let passer = self.get_relative_player(&player_id, -1);
                                 self.transfer(&player_id, &passer, cards)?;
+                                self.deck_mut(&player_id)?.sort(card_ord);
                                 self.on_end_turn(&player_id)?;
                             }
                             PromptKind::Select13 => {
                                 let cards = self.selects.get(&player_id).unwrap().clone();
                                 self.transfer("excluded", &player_id, cards)?;
+                                self.deck_mut(&player_id)?.sort(card_ord);
+                                self.on_end_turn(&player_id)?;
                             }
-                            PromptKind::OneChance => {
+                            PromptKind::UseOneChance => {
                                 let player_id = self.current.clone().unwrap();
-                                let serves = self.selects.get(&player_id).unwrap().clone();
-                                self.effect_card(&player_id, serves)?;
+                                let serves = self.river.last().unwrap().clone();
+                                self.effect_card(&player_id, &serves)?;
+                                self.last_served_player_id = Some(player_id.to_string());
                                 self.on_end_turn(&player_id)?;
                             }
                         }
+                        // reset prompt
+                        self.prompt = None;
                     }
                 }
                 Ok(())
             }
             Action::Pass { player_id } => {
+                if self.current != Some(player_id.clone()) {
+                    return Err(anyhow!("not your turn"));
+                }
                 if self.river.is_empty() {
                     return Err(anyhow!("cannot pass because river is empty"));
                 }
@@ -287,11 +301,51 @@ impl Game {
             }
             Action::Serve { player_id, .. } => {
                 let serves = self.selects.get(&player_id).unwrap().clone();
-                if serves.is_empty() || !self.servable(&serves) {
-                    return Err(anyhow!("not servable"));
+
+                if self.current != Some(player_id.clone()) {
+                    // reset select
+                    self.selects.insert(player_id.clone(), vec![]);
+                    return Err(anyhow!("not your turn"));
+                }
+                if serves.is_empty() {
+                    // reset select
+                    self.selects.insert(player_id.clone(), vec![]);
+                    return Err(anyhow!("please select cards"));
+                }
+                if let Err(e) = self.servable(&serves) {
+                    // reset select
+                    self.selects.insert(player_id.clone(), vec![]);
+                    return Err(anyhow!("{}", e));
                 }
                 self.deck_mut(&player_id)?.remove(&serves)?;
-                self.prompt_one_chance(&player_id);
+
+                let serves = self.selects.get(&player_id).unwrap().clone();
+                self.river.push(serves.clone());
+
+                let has_1_player_ids = self
+                    .active_player_ids()
+                    .iter()
+                    .filter(|id| {
+                        id != &&player_id
+                            && self
+                                .deck(id)
+                                .unwrap()
+                                .0
+                                .iter()
+                                .any(|c| c.number() == Some(1))
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+
+                if !self.effect.effect_limits.contains(&1) && !has_1_player_ids.is_empty() {
+                    self.prompt = Some((Prompt::one_chance(has_1_player_ids), HashMap::new()));
+                } else {
+                    // effect immediately
+                    let player_id = self.current.clone().unwrap();
+                    self.effect_card(&player_id, &serves)?;
+                    self.last_served_player_id = Some(player_id.to_string());
+                    self.on_end_turn(&player_id)?;
+                }
                 Ok(())
             }
         }
@@ -312,10 +366,14 @@ impl Game {
         }
     }
 
-    pub fn get_relative_player(&self, player_id: &str, d: i32) -> Option<String> {
-        let index = self.players.iter().position(|id| id == &player_id).unwrap();
-        let index = ((index as i32 + d).rem_euclid(self.active_player_ids().len() as i32)) as usize;
-        Some(self.active_player_ids()[index].clone())
+    pub fn get_relative_player(&self, player_id: &str, d: i32) -> String {
+        let active_player_ids = self.active_player_ids();
+        let index = active_player_ids
+            .iter()
+            .position(|id| id == &player_id)
+            .unwrap();
+        let index = ((index as i32 + d).rem_euclid(active_player_ids.len() as i32)) as usize;
+        active_player_ids[index].clone()
     }
 
     fn flush_river(&mut self, to: &str) -> Result<()> {
@@ -328,28 +386,16 @@ impl Game {
     pub fn flush(&mut self, to: &str) -> Result<()> {
         self.flush_river(to)?;
         self.effect = Effect::new_turn(self.effect.clone());
-        self.current = self.last_served_player_id.clone();
         Ok(())
     }
 
-    pub fn prompt_one_chance(&mut self, player_id: &str) {
-        let player_ids = self
-            .active_player_ids()
-            .iter()
-            .filter(|id| id != &&player_id)
-            .cloned()
-            .collect::<Vec<_>>();
-        self.prompt = Some((Prompt::one_chance(player_ids), HashMap::new()));
-    }
-
-    pub fn effect_card(&mut self, player_id: &str, serves: Vec<Card>) -> Result<()> {
+    pub fn effect_card(&mut self, player_id: &str, serves: &[Card]) -> Result<()> {
         self.effect.river_size = Some(serves.len());
 
         if serves.len() == 4 {
             self.effect.revoluted = !self.effect.revoluted;
         }
 
-        self.river.push(serves.to_vec());
         self.effect.river_size = Some(serves.len());
 
         let n = number(&serves);
@@ -364,14 +410,13 @@ impl Game {
                 }
                 self.prompt = Some((Prompt::select_4(player_id), HashMap::new()));
             }
-            5 => {
-                self.effect.skip = true;
-            }
+            5 => {}
             6 => {}
             7 => {
                 if !hands.0.is_empty() {
-                    self.prompt = Some((Prompt::select_7(player_id), HashMap::new()));
+                    return Ok(());
                 }
+                self.prompt = Some((Prompt::select_7(player_id), HashMap::new()));
             }
             8 => {}
             9 => {
@@ -389,7 +434,7 @@ impl Game {
             }
             12 => {
                 self.effect.is_step = true;
-                self.effect.suit_limits.extend(suits(&serves));
+                self.effect.suit_limits = suits(&serves);
             }
             13 => {
                 let excluded = self.deck("excluded")?;
@@ -398,7 +443,6 @@ impl Game {
                 }
                 self.prompt = Some((Prompt::select_13(player_id), HashMap::new()));
             }
-            // TODO
             1 => {}
             2 => {}
             _ => {
@@ -408,71 +452,85 @@ impl Game {
         Ok(())
     }
 
-    fn servable_9(&self, _serves: &[Card]) -> bool {
-        let river_size = self.effect.river_size.unwrap();
-        match river_size {
-            1 | 3 => river_size == 1 || river_size == 3,
-            n => river_size == n,
+    pub fn servable(&self, serves: &[Card]) -> Result<()> {
+        if !is_same_number(serves) {
+            return Err(anyhow!("not same number"));
         }
-    }
-
-    pub fn servable(&self, serves: &[Card]) -> bool {
-        let mut ok = is_same_number(serves);
         let Some(top) = self.river.last() else {
             // river is empty
-            return ok;
+            return Ok(());
         };
-        let river_size = self.effect.river_size.unwrap();
         // check ordering
         let ordering = if self.effect.revoluted ^ self.effect.turn_revoluted {
-            deck_ord(&top, serves).reverse()
+            deck_ord(serves, &top).reverse()
         } else {
-            deck_ord(&top, serves)
+            deck_ord(serves, &top)
         };
-        ok = ok && ordering.is_lt();
-
+        if ordering.is_lt() {
+            return Err(anyhow!("must be greater than top card"));
+        }
         // check river size
-        ok = ok
-            && match number(serves) {
-                9 if !self.effect.effect_limits.contains(&9) => self.servable_9(serves),
-                _ => serves.len() == river_size,
-            };
+        let river_size = self.effect.river_size.unwrap();
+        let expected_river_size = match number(serves) {
+            9 if !self.effect.effect_limits.contains(&9) => match river_size {
+                1 => 3,
+                3 => 1,
+                n => n,
+            },
+            _ => serves.len(),
+        };
+        if river_size != expected_river_size {
+            return Err(anyhow!(
+                "expected river size {} but {}",
+                expected_river_size,
+                river_size
+            ));
+        }
         // check steps
-        if self.effect.is_step {
-            ok = ok && cardinal(number(serves)) - cardinal(number(&top)) == 1;
+        if self.effect.is_step && cardinal(number(serves)) - cardinal(number(&top)) != 1 {
+            return Err(anyhow!("must be step"));
         }
         // check suits
-        if !self.effect.suit_limits.is_empty() {
-            ok = ok && match_suits(&top, serves);
+        if !self.effect.suit_limits.is_empty() && !match_suits(&top, serves) {
+            return Err(anyhow!(
+                "expected suits {:?} but {:?}",
+                self.effect.suit_limits,
+                suits(serves)
+            ));
         }
-        ok
+        Ok(())
     }
 
     fn on_end_turn(&mut self, player_id: &str) -> Result<()> {
+        // reset select
+        self.selects.insert(player_id.to_string(), vec![]);
+
         let hand = self.deck(&player_id)?;
-        if hand.0.is_empty() {
-            self.last_served_player_id = self.get_relative_player(&player_id, 1);
-        } else {
-            self.last_served_player_id = self.get_relative_player(&player_id, 0);
-        }
-        if self.last_served_player_id.is_none() {
+        if hand.0.is_empty() && self.active_player_ids().len() == 1 {
             return Err(anyhow!("end"));
         }
 
+        let skips = match self.river.last() {
+            Some(top) if number(top) == 5 && !self.effect.effect_limits.contains(&5) => {
+                top.len() as i32 + 1
+            }
+            Some(top) if number(top) == 8 && !self.effect.effect_limits.contains(&8) => 0,
+            Some(top) if number(top) == 1 && !self.effect.effect_limits.contains(&1) => 0,
+            _ => 1,
+        };
+        self.current = Some(self.get_relative_player(&player_id, skips));
+
         // flush
-        if self.current == self.last_served_player_id || self.current.is_none() {
-            let to = if let Some(top) = self.river.last() {
-                let n = number(top);
-                if n == 2 && !self.effect.effect_limits.contains(&2) {
+        if self.current == self.last_served_player_id {
+            let to = match self.river.last() {
+                Some(top) if number(top) == 2 && !self.effect.effect_limits.contains(&2) => {
                     "excluded"
-                } else {
-                    "trushes"
                 }
-            } else {
-                "trushes"
+                _ => "trushes",
             };
             self.flush(to)?;
         }
+
         Ok(())
     }
 }
