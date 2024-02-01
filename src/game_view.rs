@@ -10,9 +10,6 @@ static APP_HTML: &[u8] = include_bytes!("templates/app.html");
 
 impl Action {
     pub fn from_event(event: &LiveEvent) -> Result<Self> {
-        if event.event_name == "reset" {
-            return Ok(Action::Reset);
-        }
         if event.event_name == "distribute" {
             return Ok(Action::Distribute);
         }
@@ -108,9 +105,10 @@ pub fn render_game(game: &Game, config: &RenderConfig) -> Result<String> {
 
     let show_prompt = game
         .prompt
-        .as_ref()
-        .map(|(p, m)| {
-            p.player_ids.contains(&config.player_id) && !m.contains_key(&config.player_id)
+        .last()
+        .map(|p| {
+            p.player_ids.contains(&config.player_id)
+                && !game.answers.contains_key(&config.player_id)
         })
         .unwrap_or(false);
     context.insert("show_prompt", &show_prompt);
