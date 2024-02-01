@@ -1,6 +1,6 @@
 use crate::{
     card::Card,
-    game::{Action, Game},
+    game::{Answer, Distribute, EventHandler, Game, Pass, Select, Serve},
     plugin::{LiveEvent, RenderConfig},
 };
 use anyhow::{anyhow, Result};
@@ -8,36 +8,28 @@ use tera::Tera;
 
 static APP_HTML: &[u8] = include_bytes!("templates/app.html");
 
-impl Action {
-    pub fn from_event(event: &LiveEvent) -> Result<Self> {
-        if event.event_name == "distribute" {
-            return Ok(Action::Distribute);
-        }
-        if event.event_name == "select" {
-            return Ok(Action::Select {
-                field: event.value.get("field").unwrap().clone(),
-                player_id: event.player_id.clone(),
-                card: Card::try_from(event.value.get("card").unwrap().as_str())?,
-            });
-        }
-        if event.event_name == "answer" {
-            return Ok(Action::Answer {
-                player_id: event.player_id.clone(),
-                answer: event.value.get("option").unwrap().to_string(),
-            });
-        }
-        if event.event_name == "serve" {
-            return Ok(Action::Serve {
-                player_id: event.player_id.clone(),
-            });
-        }
-        if event.event_name == "pass" {
-            return Ok(Action::Pass {
-                player_id: event.player_id.clone(),
-            });
-        }
-        Err(anyhow!("invalid event"))
+pub fn from_event(event: &LiveEvent) -> Result<Box<dyn EventHandler>> {
+    if event.event_name == "distribute" {
+        return Ok(Box::new(Distribute));
     }
+    if event.event_name == "select" {
+        return Ok(Box::new(Select {
+            field: event.value.get("field").unwrap().clone(),
+            card: Card::try_from(event.value.get("card").unwrap().as_str())?,
+        }));
+    }
+    if event.event_name == "answer" {
+        return Ok(Box::new(Answer {
+            answer: event.value.get("option").unwrap().to_string(),
+        }));
+    }
+    if event.event_name == "serve" {
+        return Ok(Box::new(Serve));
+    }
+    if event.event_name == "pass" {
+        return Ok(Box::new(Pass));
+    }
+    Err(anyhow!("invalid event"))
 }
 
 pub fn render_game(game: &Game, config: &RenderConfig) -> Result<String> {

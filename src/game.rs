@@ -22,44 +22,6 @@ pub struct Prompt {
     pub options: Vec<String>,
 }
 
-impl Prompt {
-    pub fn select_4(player_id: &str) -> Self {
-        Self {
-            kind: PromptKind::Select4,
-            player_ids: vec![player_id.to_string()],
-            question: "select cards from trushes".to_string(),
-            options: vec!["ok".to_string()],
-        }
-    }
-
-    pub fn select_7(player_id: &str) -> Self {
-        Self {
-            kind: PromptKind::Select7,
-            player_ids: vec![player_id.to_string()],
-            question: "select cards from hands".to_string(),
-            options: vec!["ok".to_string()],
-        }
-    }
-
-    pub fn select_13(player_id: &str) -> Self {
-        Self {
-            kind: PromptKind::Select13,
-            player_ids: vec![player_id.to_string()],
-            question: "select cards from excluded".to_string(),
-            options: vec!["ok".to_string()],
-        }
-    }
-
-    pub fn one_chance(player_ids: Vec<String>) -> Self {
-        Self {
-            kind: PromptKind::UseOneChance,
-            player_ids,
-            question: "select A if use one chance".to_string(),
-            options: vec!["serve".to_string(), "skip".to_string()],
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Effect {
     pub river_size: Option<usize>,
@@ -98,74 +60,447 @@ impl Effect {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Game {
-    pub players: Vec<String>,
-    pub selects: HashMap<String, Vec<Card>>,
-    pub prompt: Vec<Prompt>,
-    pub answers: HashMap<String, String>,
-    pub current: Option<String>,
-    pub last_served_player_id: Option<String>,
-
-    pub river: Vec<Vec<Card>>,
-    /// players deck + trushes + excluded
-    pub fields: HashMap<String, Deck>,
-    pub effect: Effect,
+#[derive(Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+enum FieldKey {
+    Trushes,
+    Excluded,
+    Hands(String),
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
-pub enum Action {
-    Distribute,
-    Select {
-        field: String,
-        player_id: String,
-        card: Card,
-    },
-    Answer {
-        player_id: String,
-        answer: String,
-    },
-    Serve {
-        player_id: String,
-    },
-    Pass {
-        player_id: String,
-    },
+impl std::fmt::Display for FieldKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FieldKey::Trushes => write!(f, "trushes"),
+            FieldKey::Excluded => write!(f, "excluded"),
+            FieldKey::Hands(id) => write!(f, "{}", id),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Game {
+    // game state
+    pub prompt: Vec<Prompt>,
+    pub fields: HashMap<FieldKey, Deck>,
+    pub river: Vec<Vec<Card>>,
+    pub current: Option<String>,
+    pub last_served_player_id: Option<String>,
+    pub effect: Effect,
+    // player state
+    pub players: Vec<String>,
+    pub selects: HashMap<String, Vec<Card>>,
+    pub answers: HashMap<String, String>,
+}
+
+pub trait EventHandler {
+    fn on(&self, player_id: String, game: &mut Game) -> Result<()>;
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Distribute;
+
+impl EventHandler for Distribute {
+    fn on(&self, _player_id: String, game: &mut Game) -> Result<()> {
+        if game.players.is_empty() {
+            return Err(anyhow!("players is empty"));
+        }
+        let mut deck = Deck::all(2);
+        deck.shuffle();
+        let mut decks = deck.split(game.players.len())?;
+        for (i, player_id) in game.players.iter().enumerate() {
+            decks[i].sort(card_ord);
+            game.fields
+                .insert(FieldKey::Hands(player_id.to_string()), decks[i].clone());
+        }
+        game.current = Some(game.players[0].clone());
+        Ok(())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Select {
+    pub field: String,
+    pub card: Card,
+}
+
+impl EventHandler for Select {
+    fn on(&self, player_id: String, game: &mut Game) -> Result<()> {
+        if game.selects.get(&player_id).unwrap().contains(&self.card) {
+            let index = game
+                .selects
+                .get(&player_id)
+                .unwrap()
+                .iter()
+                .position(|c| c == &self.card)
+                .unwrap();
+            game.selects.get_mut(&player_id).unwrap().remove(index);
+        } else {
+            game.selects.get_mut(&player_id).unwrap().push(self.card);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Answer {
+    pub answer: String,
+}
+
+impl EventHandler for Answer {
+    fn on(&self, player_id: String, game: &mut Game) -> Result<()> {
+        if let Some(prompt) = game.prompt.clone().last() {
+            // validate answer
+            game.validate_prompt(prompt, player_id.to_string(), self.answer.clone())?;
+            game.answers.insert(player_id.to_string(), self.answer);
+
+            // check all players answers
+            if prompt.player_ids.iter().collect::<HashSet<_>>()
+                == game.answers.keys().collect::<HashSet<_>>()
+            {
+                game.answers.clear();
+                let answer_prompt = match prompt.kind {
+                    PromptKind::Select4 => AnswerPromptSelect4,
+                    _ => todo!(),
+                };
+                answer_prompt.on(player_id, game)?;
+
+                // reset select
+                game.selects.insert(player_id.to_string(), vec![]);
+
+                game.last_served_player_id = Some(player_id.to_string());
+                game.on_end_turn()?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ValidatePromptSelect4;
+
+impl EventHandler for ValidatePromptSelect4 {
+    fn on(&self, player_id: String, game: &mut Game) -> Result<()> {
+        let n_cards = game.river.last().unwrap().len();
+        if game.selects.get(&player_id).unwrap().len() != n_cards {
+            return Err(anyhow!("please select {} cards in trushes", n_cards));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AnswerPromptSelect4;
+
+impl EventHandler for AnswerPromptSelect4 {
+    fn on(&self, player_id: String, game: &mut Game) -> Result<()> {
+        let cards = game.selects.get(&player_id).unwrap().clone();
+        game.transfer(
+            &FieldKey::Trushes,
+            &FieldKey::Hands(player_id.clone()),
+            cards,
+        )?;
+        game.field_mut(&FieldKey::Hands(player_id))?.sort(card_ord);
+        Ok(())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ValidatePromptSelect7;
+
+impl EventHandler for ValidatePromptSelect7 {
+    fn on(&self, player_id: String, game: &mut Game) -> Result<()> {
+        let n_cards = game.river.last().unwrap().len();
+        if game.selects.get(&player_id).unwrap().len() != n_cards {
+            return Err(anyhow!("please select {} cards in hands", n_cards));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AnswerPromptSelect7;
+
+impl EventHandler for AnswerPromptSelect7 {
+    fn on(&self, player_id: String, game: &mut Game) -> Result<()> {
+        let cards = game.selects.get(&player_id).unwrap().clone();
+        let passer: String = game.get_relative_player(&player_id, -1);
+        game.transfer(
+            &FieldKey::Hands(player_id.to_string()),
+            &FieldKey::Hands(passer),
+            cards,
+        )?;
+        game.field_mut(&FieldKey::Hands(passer))?.sort(card_ord);
+        Ok(())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ValidatePromptSelect13;
+
+impl EventHandler for ValidatePromptSelect13 {
+    fn on(&self, player_id: String, game: &mut Game) -> Result<()> {
+        let n_cards = game.river.last().unwrap().len();
+        if game.selects.get(&player_id).unwrap().len() != n_cards {
+            return Err(anyhow!("please select {} cards in excluded", n_cards));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AnswerPromptSelect13;
+
+impl EventHandler for AnswerPromptSelect13 {
+    fn on(&self, player_id: String, game: &mut Game) -> Result<()> {
+        let cards = game.selects.get(&player_id).unwrap().clone();
+
+        game.transfer(&FieldKey::Excluded, &FieldKey::Hands(player_id), cards)?;
+        game.field_mut(&FieldKey::Hands(player_id.to_string()))?
+            .sort(card_ord);
+        Ok(())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ValidatePromptSelectOneChance {
+    answer: String,
+}
+
+impl EventHandler for ValidatePromptSelectOneChance {
+    fn on(&self, player_id: String, game: &mut Game) -> Result<()> {
+        let serves = game.selects.get(&player_id).unwrap().clone();
+        if self.answer == "serve".to_string() && (serves.len() != 1 || number(&serves) != 1) {
+            return Err(anyhow!("please select A"));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AnswerPromptSelectOneChance;
+
+impl EventHandler for AnswerPromptSelectOneChance {
+    fn on(&self, player_id: String, game: &mut Game) -> Result<()> {
+        let serves = game
+            .river
+            .last()
+            .cloned()
+            .expect("river is empty on UseOneChance");
+        let event = EffectCard { serves };
+        event.on(player_id, game)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Serve;
+
+impl EventHandler for Serve {
+    fn on(&self, player_id: String, game: &mut Game) -> Result<()> {
+        if let Some(prompt) = game.prompt.first() {
+            if prompt.player_ids.contains(&player_id) && !game.answers.contains_key(&player_id) {
+                return Err(anyhow!("please answer"));
+            }
+        }
+
+        let serves = game.selects.get(&player_id).unwrap().clone();
+        // reset select
+        game.selects.insert(player_id.to_string(), vec![]);
+
+        if game.current != Some(player_id.clone()) {
+            return Err(anyhow!("not your turn"));
+        }
+        if serves.is_empty() {
+            return Err(anyhow!("please select cards"));
+        }
+        if let Err(e) = game.servable(&serves) {
+            return Err(anyhow!("{}", e));
+        }
+
+        game.field_mut(&FieldKey::Hands(player_id))?
+            .remove(&serves)?;
+        game.river.push(serves.clone());
+
+        let has_1_player_ids = game
+            .active_player_ids()
+            .iter()
+            .filter(|id| {
+                id != &&player_id
+                    && game
+                        .field(&FieldKey::Hands(id.to_string()))
+                        .unwrap()
+                        .0
+                        .iter()
+                        .any(|c| c.number() == Some(1))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+
+        if !game.effect.effect_limits.contains(&1) && !has_1_player_ids.is_empty() {
+            let prompt = Prompt {
+                kind: PromptKind::UseOneChance,
+                player_ids: has_1_player_ids,
+                question: "select A if use one chance".to_string(),
+                options: vec!["serve".to_string(), "skip".to_string()],
+            };
+            game.prompt.push(prompt);
+        }
+        // end phase
+        if game.prompt.is_empty() {
+            let player_id = game.current.clone().unwrap();
+            let event = EffectCard { serves };
+            event.on(player_id, game)?;
+            game.last_served_player_id = Some(player_id.to_string());
+            game.on_end_turn()?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Pass;
+
+impl EventHandler for Pass {
+    fn on(&self, player_id: String, game: &mut Game) -> Result<()> {
+        if let Some(prompt) = game.prompt.first() {
+            if prompt.player_ids.contains(&player_id) && !game.answers.contains_key(&player_id) {
+                return Err(anyhow!("please answer"));
+            }
+        }
+
+        if game.current != Some(player_id.clone()) {
+            return Err(anyhow!("not your turn"));
+        }
+        if game.river.is_empty() {
+            return Err(anyhow!("cannot pass because river is empty"));
+        }
+        game.on_end_turn()?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EffectCard {
+    serves: Vec<Card>,
+}
+
+impl EventHandler for EffectCard {
+    fn on(&self, player_id: String, game: &mut Game) -> Result<()> {
+        let serves = self.serves.clone();
+        game.effect.river_size = Some(serves.len());
+
+        if serves.len() == 4 {
+            game.effect.revoluted = !game.effect.revoluted;
+        }
+
+        game.effect.river_size = Some(serves.len());
+
+        let n = number(&serves);
+        if game.effect.effect_limits.contains(&n) {
+            return Ok(());
+        }
+
+        let hands = game.field(&FieldKey::Hands(player_id))?;
+        match n {
+            3 => game.effect.effect_limits.extend(1..=13),
+            4 => {
+                let trushes = game.field(&FieldKey::Trushes)?;
+                if hands.0.is_empty() || trushes.0.is_empty() {
+                    return Ok(());
+                }
+                let prompt = Prompt {
+                    kind: PromptKind::Select4,
+                    player_ids: vec![player_id.to_string()],
+                    question: "select cards from trushes".to_string(),
+                    options: vec!["ok".to_string()],
+                };
+                game.prompt.push(prompt);
+            }
+            5 => {}
+            6 => {}
+            7 => {
+                if hands.0.is_empty() {
+                    return Ok(());
+                }
+                let prompt = Prompt {
+                    kind: PromptKind::Select7,
+                    player_ids: vec![player_id.to_string()],
+                    question: "select cards from hands".to_string(),
+                    options: vec!["ok".to_string()],
+                };
+                game.prompt.push(prompt);
+            }
+            8 => {}
+            9 => {
+                game.effect.river_size = match game.effect.river_size {
+                    Some(1) => Some(3),
+                    Some(3) => Some(1),
+                    n => n,
+                };
+            }
+            10 => {
+                game.effect.effect_limits.extend(1..10);
+            }
+            11 => {
+                game.effect.turn_revoluted = true;
+            }
+            12 => {
+                game.effect.is_step = true;
+                game.effect.suit_limits = suits(&serves);
+            }
+            13 => {
+                let excluded = game.field(&FieldKey::Excluded)?;
+                if hands.0.is_empty() || excluded.0.is_empty() {
+                    return Ok(());
+                }
+                let prompt = Prompt {
+                    kind: PromptKind::Select13,
+                    player_ids: vec![player_id.to_string()],
+                    question: "select cards from excluded".to_string(),
+                    options: vec!["ok".to_string()],
+                };
+                game.prompt.push(prompt);
+            }
+            1 => {}
+            2 => {}
+            _ => {
+                return Err(anyhow!("invalid number {}", n));
+            }
+        };
+        Ok(())
+    }
 }
 
 impl Game {
-    pub fn deck_mut(&mut self, id: &str) -> Result<&mut Deck> {
+    pub fn field_mut(&mut self, id: &FieldKey) -> Result<&mut Deck> {
         let Some(deck) = self.fields.get_mut(id) else {
             return Err(anyhow!("field {} not found", id));
         };
         Ok(deck)
     }
 
-    pub fn deck(&self, id: &str) -> Result<&Deck> {
+    pub fn field(&self, id: &FieldKey) -> Result<&Deck> {
         let Some(deck) = self.fields.get(id) else {
             return Err(anyhow!("field {} not found", id));
         };
         Ok(deck)
     }
 
-    pub fn transfer(&mut self, from: &str, to: &str, cards: Vec<Card>) -> Result<()> {
-        self.deck_mut(from)?.remove(&cards)?;
-        self.deck_mut(to)?.0.extend(cards.to_vec());
+    pub fn transfer(&mut self, from: &FieldKey, to: &FieldKey, cards: Vec<Card>) -> Result<()> {
+        self.field_mut(from)?.remove(&cards);
+        self.field_mut(to)?.0.extend(cards.to_vec());
         Ok(())
     }
 }
 
 impl Game {
     pub fn new(player_ids: Vec<String>) -> Self {
-        let player_decks = player_ids
+        let mut fields = player_ids
             .iter()
-            .map(|id| (id.clone(), Deck::new(vec![])))
+            .map(|id| (FieldKey::Hands(id.clone()), Deck::new(vec![])))
             .collect::<HashMap<_, _>>();
-        let mut fields = HashMap::from_iter(vec![
-            ("trushes".to_string(), Deck::new(vec![])),
-            ("excluded".to_string(), Deck::new(vec![])),
-        ]);
-        fields.extend(player_decks);
+        fields.insert(FieldKey::Trushes, Deck::new(vec![]));
+        fields.insert(FieldKey::Excluded, Deck::new(vec![]));
 
         Self {
             players: player_ids.clone(),
@@ -183,211 +518,15 @@ impl Game {
     fn active_player_ids(&self) -> Vec<String> {
         self.players
             .iter()
-            .filter(|id| !self.deck(id).unwrap().0.is_empty())
+            .filter(|id| {
+                !self
+                    .field(&FieldKey::Hands(id.to_string()))
+                    .unwrap()
+                    .0
+                    .is_empty()
+            })
             .cloned()
             .collect()
-    }
-
-    pub fn apply_action(&mut self, action: Action) -> Result<()> {
-        match action {
-            // game actions
-            Action::Distribute => {
-                if self.players.is_empty() {
-                    return Err(anyhow!("players is empty"));
-                }
-                let mut deck = Deck::all(2);
-                deck.shuffle();
-                let mut decks = deck.split(self.players.len())?;
-                for (i, player_id) in self.players.iter().enumerate() {
-                    decks[i].sort(card_ord);
-                    self.fields.insert(player_id.to_string(), decks[i].clone());
-                }
-                self.current = Some(self.players[0].clone());
-                Ok(())
-            }
-            // player actions
-            Action::Select {
-                player_id, card, ..
-            } => {
-                self.toggle_select(&player_id, card);
-                Ok(())
-            }
-            Action::Answer { player_id, answer } => {
-                if let Some(prompt) = self.prompt.clone().last() {
-                    // validate answer
-                    self.validate_prompt(prompt, player_id.clone(), answer.clone())?;
-                    self.answers.insert(player_id.clone(), answer);
-
-                    // check all players answers
-                    if prompt.player_ids.iter().collect::<HashSet<_>>()
-                        == self.answers.keys().collect::<HashSet<_>>()
-                    {
-                        self.answers.clear();
-                        self.action_prompt()?;
-
-                        // reset select
-                        self.selects.insert(player_id.to_string(), vec![]);
-
-                        self.last_served_player_id = Some(player_id.to_string());
-                        self.on_end_turn()?;
-                    }
-                }
-                Ok(())
-            }
-            Action::Pass { player_id } => {
-                if let Some(prompt) = self.prompt.first() {
-                    if prompt.player_ids.contains(&player_id)
-                        && !self.answers.contains_key(&player_id)
-                    {
-                        return Err(anyhow!("please answer"));
-                    }
-                }
-
-                if self.current != Some(player_id.clone()) {
-                    return Err(anyhow!("not your turn"));
-                }
-                if self.river.is_empty() {
-                    return Err(anyhow!("cannot pass because river is empty"));
-                }
-                self.on_end_turn()?;
-                Ok(())
-            }
-            Action::Serve { player_id, .. } => {
-                if let Some(prompt) = self.prompt.first() {
-                    if prompt.player_ids.contains(&player_id)
-                        && !self.answers.contains_key(&player_id)
-                    {
-                        return Err(anyhow!("please answer"));
-                    }
-                }
-
-                let serves = self.selects.get(&player_id).unwrap().clone();
-                // reset select
-                self.selects.insert(player_id.to_string(), vec![]);
-
-                if self.current != Some(player_id.clone()) {
-                    return Err(anyhow!("not your turn"));
-                }
-                if serves.is_empty() {
-                    return Err(anyhow!("please select cards"));
-                }
-                if let Err(e) = self.servable(&serves) {
-                    return Err(anyhow!("{}", e));
-                }
-
-                self.deck_mut(&player_id)?.remove(&serves)?;
-                self.river.push(serves.clone());
-
-                let has_1_player_ids = self
-                    .active_player_ids()
-                    .iter()
-                    .filter(|id| {
-                        id != &&player_id
-                            && self
-                                .deck(id)
-                                .unwrap()
-                                .0
-                                .iter()
-                                .any(|c| c.number() == Some(1))
-                    })
-                    .cloned()
-                    .collect::<Vec<_>>();
-
-                if !self.effect.effect_limits.contains(&1) && !has_1_player_ids.is_empty() {
-                    self.prompt.push(Prompt::one_chance(has_1_player_ids));
-                }
-                // end phase
-                if self.prompt.is_empty() {
-                    let player_id = self.current.clone().unwrap();
-                    self.effect_card(&player_id, &serves)?;
-                    self.last_served_player_id = Some(player_id.to_string());
-                    self.on_end_turn()?;
-                }
-                Ok(())
-            }
-        }
-    }
-
-    fn validate_prompt(&self, prompt: &Prompt, player_id: String, answer: String) -> Result<()> {
-        if !prompt.options.contains(&answer) {
-            return Err(anyhow!("invalid answer"));
-        }
-        match prompt.kind {
-            PromptKind::Select4 => {
-                let n_cards = self.river.last().unwrap().len();
-                if self.selects.get(&player_id).unwrap().len() != n_cards {
-                    return Err(anyhow!("please select {} cards in trushes", n_cards));
-                }
-            }
-            PromptKind::Select7 => {
-                let n_cards = self.river.last().unwrap().len();
-                if self.selects.get(&player_id).unwrap().len() != n_cards {
-                    return Err(anyhow!("please select {} cards in hands", n_cards));
-                }
-            }
-            PromptKind::Select13 => {
-                let n_cards = self.river.last().unwrap().len();
-                if self.selects.get(&player_id).unwrap().len() != n_cards {
-                    return Err(anyhow!("please select {} cards in excluded", n_cards));
-                }
-            }
-            PromptKind::UseOneChance => {
-                let serves = self.selects.get(&player_id).unwrap().clone();
-                if answer == "serve".to_string() && (serves.len() != 1 || number(&serves) != 1) {
-                    return Err(anyhow!("please select A"));
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn action_prompt(&mut self) -> Result<()> {
-        let Some(prompt) = self.prompt.pop() else {
-            return Ok(());
-        };
-        let player_id = self.current.clone().unwrap();
-        match prompt.kind {
-            PromptKind::Select4 => {
-                let cards = self.selects.get(&player_id).unwrap().clone();
-                self.transfer("trushes", &player_id, cards)?;
-                self.deck_mut(&player_id)?.sort(card_ord);
-            }
-            PromptKind::Select7 => {
-                let cards = self.selects.get(&player_id).unwrap().clone();
-                let passer: String = self.get_relative_player(&player_id, -1);
-                self.transfer(&player_id, &passer, cards)?;
-                self.deck_mut(&passer)?.sort(card_ord);
-            }
-            PromptKind::Select13 => {
-                let cards = self.selects.get(&player_id).unwrap().clone();
-                self.transfer("excluded", &player_id, cards)?;
-                self.deck_mut(&player_id)?.sort(card_ord);
-            }
-            PromptKind::UseOneChance => {
-                let serves = self
-                    .river
-                    .last()
-                    .cloned()
-                    .expect("river is empty on UseOneChance");
-                self.effect_card(&player_id, &serves)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn toggle_select(&mut self, player_id: &str, card: Card) {
-        if self.selects.get(player_id).unwrap().contains(&card) {
-            let index = self
-                .selects
-                .get(player_id)
-                .unwrap()
-                .iter()
-                .position(|c| c == &card)
-                .unwrap();
-            self.selects.get_mut(player_id).unwrap().remove(index);
-        } else {
-            self.selects.get_mut(player_id).unwrap().push(card);
-        }
     }
 
     pub fn get_relative_player(&self, player_id: &str, d: i32) -> String {
@@ -400,82 +539,11 @@ impl Game {
         active_player_ids[index].clone()
     }
 
-    fn flush_river(&mut self, to: &str) -> Result<()> {
+    fn flush_river(&mut self, to: &FieldKey) -> Result<()> {
         let cards = self.river.iter().flatten().cloned().collect::<Vec<_>>();
-        self.deck_mut(to)?.0.extend(cards);
+        self.field_mut(to)?.0.extend(cards);
         self.river.clear();
-        Ok(())
-    }
-
-    pub fn flush(&mut self, to: &str) -> Result<()> {
-        self.flush_river(to)?;
         self.effect = Effect::new_turn(self.effect.clone());
-        Ok(())
-    }
-
-    pub fn effect_card(&mut self, player_id: &str, serves: &[Card]) -> Result<()> {
-        self.effect.river_size = Some(serves.len());
-
-        if serves.len() == 4 {
-            self.effect.revoluted = !self.effect.revoluted;
-        }
-
-        self.effect.river_size = Some(serves.len());
-
-        let n = number(&serves);
-        if self.effect.effect_limits.contains(&n) {
-            return Ok(());
-        }
-
-        let hands = self.deck(player_id)?;
-        match n {
-            3 => self.effect.effect_limits.extend(1..=13),
-            4 => {
-                let trushes = self.deck("trushes")?;
-                if hands.0.is_empty() || trushes.0.is_empty() {
-                    return Ok(());
-                }
-                self.prompt.push(Prompt::select_4(player_id));
-            }
-            5 => {}
-            6 => {}
-            7 => {
-                if hands.0.is_empty() {
-                    return Ok(());
-                }
-                self.prompt.push(Prompt::select_7(player_id));
-            }
-            8 => {}
-            9 => {
-                self.effect.river_size = match self.effect.river_size {
-                    Some(1) => Some(3),
-                    Some(3) => Some(1),
-                    n => n,
-                };
-            }
-            10 => {
-                self.effect.effect_limits.extend(1..10);
-            }
-            11 => {
-                self.effect.turn_revoluted = true;
-            }
-            12 => {
-                self.effect.is_step = true;
-                self.effect.suit_limits = suits(&serves);
-            }
-            13 => {
-                let excluded = self.deck("excluded")?;
-                if hands.0.is_empty() || excluded.0.is_empty() {
-                    return Ok(());
-                }
-                self.prompt.push(Prompt::select_13(player_id));
-            }
-            1 => {}
-            2 => {}
-            _ => {
-                return Err(anyhow!("invalid number {}", n));
-            }
-        };
         Ok(())
     }
 
@@ -531,7 +599,7 @@ impl Game {
     fn on_end_turn(&mut self) -> Result<()> {
         let player_id = self.current.clone().unwrap();
 
-        let hand = self.deck(&player_id)?;
+        let hand = self.field(&FieldKey::Hands(player_id))?;
         if hand.0.is_empty() && self.active_player_ids().len() == 1 {
             return Err(anyhow!("end"));
         }
@@ -550,11 +618,11 @@ impl Game {
         if self.current == self.last_served_player_id {
             let to = match self.river.last() {
                 Some(top) if number(top) == 2 && !self.effect.effect_limits.contains(&2) => {
-                    "excluded"
+                    FieldKey::Excluded
                 }
-                _ => "trushes",
+                _ => FieldKey::Trushes,
             };
-            self.flush(to)?;
+            self.flush_river(&to)?;
         }
 
         Ok(())
