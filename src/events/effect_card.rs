@@ -14,22 +14,22 @@ pub struct EffectCard {
 impl EventHandler for EffectCard {
     fn on(&self, player_id: String, game: &mut Game) -> Result<()> {
         let serves = self.serves.clone();
-        game.effect.river_size = Some(serves.len());
+        game.river_size = Some(serves.len());
 
         if serves.len() == 4 {
-            game.effect.revoluted = !game.effect.revoluted;
+            game.revoluted = !game.revoluted;
         }
 
-        game.effect.river_size = Some(serves.len());
+        game.river_size = Some(serves.len());
 
         let n = number(&serves);
-        if game.effect.effect_limits.contains(&n) {
+        if game.effect_limits.contains(&n) {
             return Ok(());
         }
 
         let hands = game.field(&FieldKey::Hands(player_id.clone()))?;
         match n {
-            3 => game.effect.effect_limits.extend(1..=13),
+            3 => game.effect_limits.extend(1..=13),
             4 => {
                 let trushes = game.field(&FieldKey::Trushes)?;
                 if hands.0.is_empty() || trushes.0.is_empty() {
@@ -59,21 +59,21 @@ impl EventHandler for EffectCard {
             }
             8 => {}
             9 => {
-                game.effect.river_size = match game.effect.river_size {
+                game.river_size = match game.river_size {
                     Some(1) => Some(3),
                     Some(3) => Some(1),
                     n => n,
                 };
             }
             10 => {
-                game.effect.effect_limits.extend(1..10);
+                game.effect_limits.extend(1..10);
             }
             11 => {
-                game.effect.turn_revoluted = true;
+                game.turn_revoluted = true;
             }
             12 => {
-                game.effect.is_step = true;
-                game.effect.suit_limits = suits(&serves);
+                game.is_step = true;
+                game.suit_limits = suits(&serves);
             }
             13 => {
                 let excluded = game.field(&FieldKey::Excluded)?;

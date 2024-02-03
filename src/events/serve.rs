@@ -22,7 +22,7 @@ impl EventHandler for ValidateServe {
             return Ok(());
         };
         // check ordering
-        let ordering = if game.effect.revoluted ^ game.effect.turn_revoluted {
+        let ordering = if game.revoluted ^ game.turn_revoluted {
             deck_ord(&self.serves, top).reverse()
         } else {
             deck_ord(&self.serves, top)
@@ -31,9 +31,9 @@ impl EventHandler for ValidateServe {
             return Err(anyhow!("must be greater than top card"));
         }
         // check river size
-        let river_size = game.effect.river_size.unwrap();
+        let river_size = game.river_size.unwrap();
         let expected_river_size = match number(&self.serves) {
-            9 if !game.effect.effect_limits.contains(&9) => match river_size {
+            9 if !game.effect_limits.contains(&9) => match river_size {
                 1 => 3,
                 3 => 1,
                 n => n,
@@ -48,14 +48,14 @@ impl EventHandler for ValidateServe {
             ));
         }
         // check steps
-        if game.effect.is_step && cardinal(number(&self.serves)) - cardinal(number(top)) != 1 {
+        if game.is_step && cardinal(number(&self.serves)) - cardinal(number(top)) != 1 {
             return Err(anyhow!("must be step"));
         }
         // check suits
-        if !game.effect.suit_limits.is_empty() && !match_suits(top, &self.serves) {
+        if !game.suit_limits.is_empty() && !match_suits(top, &self.serves) {
             return Err(anyhow!(
                 "expected suits {:?} but {:?}",
-                game.effect.suit_limits,
+                game.suit_limits,
                 suits(&self.serves)
             ));
         }
@@ -108,7 +108,7 @@ impl EventHandler for Serve {
             .cloned()
             .collect::<Vec<_>>();
 
-        if !game.effect.effect_limits.contains(&1) && !has_1_player_ids.is_empty() {
+        if !game.effect_limits.contains(&1) && !has_1_player_ids.is_empty() {
             let prompt = Prompt {
                 kind: PromptKind::UseOneChance,
                 player_ids: has_1_player_ids,

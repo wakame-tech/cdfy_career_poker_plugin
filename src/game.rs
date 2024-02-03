@@ -22,44 +22,6 @@ pub struct Prompt {
     pub options: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Effect {
-    pub river_size: Option<usize>,
-    pub suit_limits: HashSet<Suit>,
-    /// a number includes `effect_limits` ignore effect
-    pub effect_limits: HashSet<u8>,
-    /// card strength is reversed until the river is reset
-    pub turn_revoluted: bool,
-    /// when `is_step` is true, delta of previous cards number must be 1
-    pub is_step: bool,
-    /// when `revoluted` is true, card strength is reversed
-    pub revoluted: bool,
-}
-
-impl Effect {
-    pub fn new() -> Self {
-        Self {
-            river_size: None,
-            suit_limits: HashSet::new(),
-            effect_limits: HashSet::new(),
-            turn_revoluted: false,
-            is_step: false,
-            revoluted: false,
-        }
-    }
-
-    pub fn new_turn(effect: Effect) -> Self {
-        Self {
-            river_size: None,
-            suit_limits: HashSet::new(),
-            effect_limits: HashSet::new(),
-            turn_revoluted: false,
-            is_step: false,
-            ..effect
-        }
-    }
-}
-
 #[derive(Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FieldKey {
     Trushes,
@@ -82,10 +44,21 @@ pub struct Game {
     // game state
     pub prompt: Vec<Prompt>,
     pub fields: HashMap<FieldKey, Deck>,
+    // river
     pub river: Vec<Vec<Card>>,
+    pub river_size: Option<usize>,
+    pub suit_limits: HashSet<Suit>,
+    /// a number includes `effect_limits` ignore effect
+    pub effect_limits: HashSet<u8>,
+    /// card strength is reversed until the river is reset
+    pub turn_revoluted: bool,
+    /// when `is_step` is true, delta of previous cards number must be 1
+    pub is_step: bool,
+    /// when `revoluted` is true, card strength is reversed
+    pub revoluted: bool,
+
     pub current: Option<String>,
     pub last_served_player_id: Option<String>,
-    pub effect: Effect,
     // player state
     pub players: Vec<String>,
     pub selects: HashMap<String, Vec<Card>>,
@@ -102,15 +75,23 @@ impl Game {
         fields.insert(FieldKey::Excluded, Deck::new(vec![]));
 
         Self {
-            players: player_ids.clone(),
             prompt: vec![],
+            fields,
+
+            river: vec![],
+            river_size: None,
+            suit_limits: HashSet::new(),
+            effect_limits: HashSet::new(),
+            turn_revoluted: false,
+            is_step: false,
+            revoluted: false,
+
+            current: None,
+            last_served_player_id: None,
+
+            players: player_ids.clone(),
             answers: HashMap::new(),
             selects: HashMap::from_iter(player_ids.iter().map(|id| (id.to_string(), Vec::new()))),
-            river: vec![],
-            last_served_player_id: None,
-            current: None,
-            fields,
-            effect: Effect::new(),
         }
     }
 
@@ -162,7 +143,13 @@ impl Game {
         let cards = self.river.iter().flatten().cloned().collect::<Vec<_>>();
         self.field_mut(to)?.0.extend(cards);
         self.river.clear();
-        self.effect = Effect::new_turn(self.effect.clone());
+
+        self.river_size = None;
+        self.suit_limits = HashSet::new();
+        self.effect_limits = HashSet::new();
+        self.turn_revoluted = false;
+        self.is_step = false;
+
         Ok(())
     }
 
@@ -179,19 +166,18 @@ impl Game {
             .last()
             .expect("river must not be empty when end turn");
 
+        // next player
         let skips = match top {
-            _ if number(top) == 5 && !self.effect.effect_limits.contains(&5) => {
-                top.len() as i32 + 1
-            }
-            _ if number(top) == 8 && !self.effect.effect_limits.contains(&8) => 0,
-            _ if number(top) == 1 && !self.effect.effect_limits.contains(&1) => 0,
+            _ if number(top) == 5 && !self.effect_limits.contains(&5) => top.len() as i32 + 1,
+            _ if number(top) == 8 && !self.effect_limits.contains(&8) => 0,
+            _ if number(top) == 1 && !self.effect_limits.contains(&1) => 0,
             _ => 1,
         };
         self.current = Some(self.get_relative_player(&player_id, skips));
 
         // flush
         if self.current == self.last_served_player_id {
-            let to = if number(top) == 2 && !self.effect.effect_limits.contains(&2) {
+            let to = if number(top) == 2 && !self.effect_limits.contains(&2) {
                 FieldKey::Excluded
             } else {
                 FieldKey::Trushes
