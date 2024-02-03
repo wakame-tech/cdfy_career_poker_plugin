@@ -1,6 +1,10 @@
 use crate::{
     card::Card,
-    game::{Answer, Distribute, EventHandler, Game, Pass, Select, Serve},
+    events::{
+        answer::Answer, distribute::Distribute, pass::Pass, select::Select, serve::Serve,
+        EventHandler,
+    },
+    game::{FieldKey, Game},
     plugin::{LiveEvent, RenderConfig},
 };
 use anyhow::{anyhow, Result};
@@ -9,27 +13,23 @@ use tera::Tera;
 static APP_HTML: &[u8] = include_bytes!("templates/app.html");
 
 pub fn from_event(event: &LiveEvent) -> Result<Box<dyn EventHandler>> {
-    if event.event_name == "distribute" {
-        return Ok(Box::new(Distribute));
-    }
-    if event.event_name == "select" {
-        return Ok(Box::new(Select {
-            field: event.value.get("field").unwrap().clone(),
+    match event {
+        LiveEvent { event_name, .. } if event_name == "distribute" => Ok(Box::new(Distribute)),
+        LiveEvent {
+            event_name, value, ..
+        } if event_name == "select" => Ok(Box::new(Select {
+            field: value.get("field").unwrap().clone(),
             card: Card::try_from(event.value.get("card").unwrap().as_str())?,
-        }));
+        })),
+        LiveEvent {
+            event_name, value, ..
+        } if event_name == "answer" => Ok(Box::new(Answer {
+            answer: value.get("option").unwrap().to_string(),
+        })),
+        LiveEvent { event_name, .. } if event_name == "serve" => Ok(Box::new(Serve)),
+        LiveEvent { event_name, .. } if event_name == "pass" => Ok(Box::new(Pass)),
+        _ => Err(anyhow!("invalid event")),
     }
-    if event.event_name == "answer" {
-        return Ok(Box::new(Answer {
-            answer: event.value.get("option").unwrap().to_string(),
-        }));
-    }
-    if event.event_name == "serve" {
-        return Ok(Box::new(Serve));
-    }
-    if event.event_name == "pass" {
-        return Ok(Box::new(Pass));
-    }
-    Err(anyhow!("invalid event"))
 }
 
 pub fn render_game(game: &Game, config: &RenderConfig) -> Result<String> {
@@ -42,7 +42,7 @@ pub fn render_game(game: &Game, config: &RenderConfig) -> Result<String> {
 
     let trushes = game
         .fields
-        .get("trushes")
+        .get(&FieldKey::Trushes)
         .unwrap()
         .0
         .iter()
@@ -58,7 +58,7 @@ pub fn render_game(game: &Game, config: &RenderConfig) -> Result<String> {
 
     let excluded = game
         .fields
-        .get("excluded")
+        .get(&FieldKey::Excluded)
         .unwrap()
         .0
         .iter()
@@ -82,7 +82,7 @@ pub fn render_game(game: &Game, config: &RenderConfig) -> Result<String> {
         .collect::<Vec<_>>();
     context.insert("river", &river);
 
-    let hands = game.fields[&config.player_id]
+    let hands = game.fields[&FieldKey::Hands(config.player_id.to_string())]
         .0
         .iter()
         .map(|c| {

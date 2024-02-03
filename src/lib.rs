@@ -1,5 +1,5 @@
 use crate::{
-    game::Action,
+    game_view::from_event,
     plugin::{GameConfig, LiveEvent, RenderConfig},
 };
 use anyhow::Result;
@@ -8,6 +8,7 @@ use game::Game;
 
 pub mod card;
 pub mod deck;
+mod events;
 mod game;
 mod game_view;
 mod plugin;
@@ -42,8 +43,8 @@ pub fn get_state(_: ()) -> FnResult<Option<Game>> {
 #[plugin_fn]
 pub fn handle_event(Json(event): Json<LiveEvent>) -> FnResult<()> {
     let mut game: Game = var::get("game")?.unwrap();
-    let action = Action::from_event(&event)?;
-    game.apply_action(action)?;
+    let handler = from_event(&event)?;
+    handler.on(event.player_id, &mut game)?;
     var::set("game", &game)?;
     Ok(())
 }
