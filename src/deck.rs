@@ -60,7 +60,7 @@ impl Deck {
 }
 
 fn remove_items<T: Eq + Clone>(items: &mut Vec<T>, removes: &[T]) -> Result<()> {
-    if removes.iter().any(|i| !items.contains(&i)) {
+    if removes.iter().any(|i| !items.contains(i)) {
         return Err(anyhow!("remove items not in items"));
     }
     let indices = removes
@@ -87,7 +87,7 @@ where
 
 pub fn deck_ord(lhs: &[Card], rhs: &[Card]) -> Ordering {
     let (mut lhs, mut rhs) = (lhs.to_vec(), rhs.to_vec());
-    lhs.sort_by(|a, b| card_ord(a, b));
-    rhs.sort_by(|a, b| card_ord(a, b));
+    lhs.sort_by(card_ord);
+    rhs.sort_by(card_ord);
     vec_ord(lhs.iter(), rhs.iter(), card_ord)
 }

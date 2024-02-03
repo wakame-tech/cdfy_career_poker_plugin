@@ -151,7 +151,7 @@ pub struct ValidatePromptSelectOneChance {
 impl EventHandler for ValidatePromptSelectOneChance {
     fn on(&self, player_id: String, game: &mut Game) -> Result<()> {
         let serves = game.selects.get(&player_id).unwrap().clone();
-        if self.answer == "serve".to_string() && (serves.len() != 1 || number(&serves) != 1) {
+        if self.answer == *"serve" && (serves.len() != 1 || number(&serves) != 1) {
             return Err(anyhow!("please select A"));
         }
         Ok(())

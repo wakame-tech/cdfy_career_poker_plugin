@@ -152,7 +152,7 @@ impl Game {
         let active_player_ids = self.active_player_ids();
         let index = active_player_ids
             .iter()
-            .position(|id| id == &player_id)
+            .position(|id| id == player_id)
             .unwrap();
         let index = ((index as i32 + d).rem_euclid(active_player_ids.len() as i32)) as usize;
         active_player_ids[index].clone()
@@ -174,27 +174,30 @@ impl Game {
             return Err(anyhow!("end"));
         }
 
-        let skips = match self.river.last() {
-            Some(top) if number(top) == 5 && !self.effect.effect_limits.contains(&5) => {
+        let top = self
+            .river
+            .last()
+            .expect("river must not be empty when end turn");
+
+        let skips = match top {
+            _ if number(top) == 5 && !self.effect.effect_limits.contains(&5) => {
                 top.len() as i32 + 1
             }
-            Some(top) if number(top) == 8 && !self.effect.effect_limits.contains(&8) => 0,
-            Some(top) if number(top) == 1 && !self.effect.effect_limits.contains(&1) => 0,
+            _ if number(top) == 8 && !self.effect.effect_limits.contains(&8) => 0,
+            _ if number(top) == 1 && !self.effect.effect_limits.contains(&1) => 0,
             _ => 1,
         };
         self.current = Some(self.get_relative_player(&player_id, skips));
 
         // flush
         if self.current == self.last_served_player_id {
-            let to = match self.river.last() {
-                Some(top) if number(top) == 2 && !self.effect.effect_limits.contains(&2) => {
-                    FieldKey::Excluded
-                }
-                _ => FieldKey::Trushes,
+            let to = if number(top) == 2 && !self.effect.effect_limits.contains(&2) {
+                FieldKey::Excluded
+            } else {
+                FieldKey::Trushes
             };
             self.flush_river(&to)?;
         }
-
         Ok(())
     }
 }

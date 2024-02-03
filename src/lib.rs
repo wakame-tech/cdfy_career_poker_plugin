@@ -8,6 +8,7 @@ use game::Game;
 
 pub mod card;
 pub mod deck;
+
 mod events;
 mod game;
 mod game_view;
@@ -23,7 +24,7 @@ impl ToBytes<'_> for Game {
 
 impl FromBytesOwned for Game {
     fn from_bytes_owned(bytes: &[u8]) -> Result<Self, Error> {
-        Ok(serde_json::from_slice(&bytes)?)
+        Ok(serde_json::from_slice(bytes)?)
     }
 }
 

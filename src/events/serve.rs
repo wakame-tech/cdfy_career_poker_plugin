@@ -23,9 +23,9 @@ impl EventHandler for ValidateServe {
         };
         // check ordering
         let ordering = if game.effect.revoluted ^ game.effect.turn_revoluted {
-            deck_ord(&self.serves, &top).reverse()
+            deck_ord(&self.serves, top).reverse()
         } else {
-            deck_ord(&self.serves, &top)
+            deck_ord(&self.serves, top)
         };
         if ordering.is_lt() {
             return Err(anyhow!("must be greater than top card"));
@@ -48,11 +48,11 @@ impl EventHandler for ValidateServe {
             ));
         }
         // check steps
-        if game.effect.is_step && cardinal(number(&self.serves)) - cardinal(number(&top)) != 1 {
+        if game.effect.is_step && cardinal(number(&self.serves)) - cardinal(number(top)) != 1 {
             return Err(anyhow!("must be step"));
         }
         // check suits
-        if !game.effect.suit_limits.is_empty() && !match_suits(&top, &self.serves) {
+        if !game.effect.suit_limits.is_empty() && !match_suits(top, &self.serves) {
             return Err(anyhow!(
                 "expected suits {:?} but {:?}",
                 game.effect.suit_limits,
