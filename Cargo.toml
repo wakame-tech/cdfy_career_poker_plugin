@@ -10,6 +10,7 @@ tera = { version = "1", default-features = false }
 anyhow = { version = "1.0", default-features = false }
 extism-pdk = "1.0.0"
 rand = "0.8.5"
+serde_with = "3.6.1"
 
 [lib]
 crate-type = ["cdylib"]

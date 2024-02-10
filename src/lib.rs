@@ -3,7 +3,7 @@ use crate::{
     game_view::Ctx,
     plugin::{GameConfig, LiveEvent, RenderConfig},
 };
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use extism_pdk::*;
 use game::Game;
 
@@ -38,13 +38,14 @@ pub fn init_game(Json(config): Json<GameConfig>) -> FnResult<()> {
 
 // debug
 #[plugin_fn]
-pub fn get_state(_: ()) -> FnResult<Option<Game>> {
-    Ok(var::get("game")?)
+pub fn get_state(_: ()) -> FnResult<Game> {
+    let game = var::get("game")?.ok_or(anyhow!("Game not found"))?;
+    Ok(game)
 }
 
 #[plugin_fn]
 pub fn handle_event(Json(event): Json<LiveEvent>) -> FnResult<()> {
-    let mut game: Game = var::get("game")?.unwrap();
+    let mut game: Game = var::get("game")?.ok_or(anyhow!("Game not found"))?;
     let handler = from_live_event(&event)?;
     handler.on(event.player_id, &mut game)?;
     var::set("game", &game)?;
@@ -53,8 +54,8 @@ pub fn handle_event(Json(event): Json<LiveEvent>) -> FnResult<()> {
 
 #[plugin_fn]
 pub fn render(Json(config): Json<RenderConfig>) -> FnResult<String> {
-    let game: Game = var::get("game")?.unwrap();
-    let ctx = Ctx::new(&game, &config);
+    let game: Game = var::get("game")?.ok_or(anyhow!("Game not found"))?;
+    let ctx = Ctx::new(&game, &config)?;
     let html = ctx.render()?;
     Ok(html)
 }

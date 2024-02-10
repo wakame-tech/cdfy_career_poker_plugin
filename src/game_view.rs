@@ -3,7 +3,7 @@ use crate::{
     game::{FieldKey, Game, Prompt},
     plugin::RenderConfig,
 };
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use tera::Tera;
 
 static APP_HTML: &[u8] = include_bytes!("templates/app.html");
@@ -30,17 +30,33 @@ impl Ctx {
             .collect()
     }
 
-    pub fn new(game: &Game, config: &RenderConfig) -> Self {
+    pub fn new(game: &Game, config: &RenderConfig) -> Result<Self> {
         let is_current = game.current == Some(config.player_id.clone());
         let selects = &game.selects[&config.player_id];
 
-        let trushes =
-            Self::into_deck_view(&game.fields.get(&FieldKey::Trushes).unwrap().0, &selects);
-        let excluded =
-            Self::into_deck_view(&game.fields.get(&FieldKey::Excluded).unwrap().0, &selects);
+        let trushes = Self::into_deck_view(
+            &game
+                .fields
+                .get(&FieldKey::Trushes)
+                .ok_or(anyhow!("trushes not found"))?
+                .0,
+            &selects,
+        );
+        let excluded = Self::into_deck_view(
+            &game
+                .fields
+                .get(&FieldKey::Excluded)
+                .ok_or(anyhow!("excluded not found"))?
+                .0,
+            &selects,
+        );
         let river = Self::into_deck_view(game.river.last().unwrap_or(&vec![]), &[]);
         let hands = Self::into_deck_view(
-            &game.fields[&FieldKey::Hands(config.player_id.to_string())].0,
+            &game
+                .fields
+                .get(&FieldKey::Hands(config.player_id.to_string()))
+                .ok_or(anyhow!("hands not found"))?
+                .0,
             &selects,
         );
 
@@ -53,7 +69,7 @@ impl Ctx {
             })
             .unwrap_or(false);
 
-        Self {
+        Ok(Self {
             is_current,
             current: game.current.clone(),
             trushes,
@@ -62,7 +78,7 @@ impl Ctx {
             hands,
             show_prompt,
             prompt: game.prompt.clone(),
-        }
+        })
     }
 
     pub fn render(&self) -> Result<String> {
@@ -76,7 +92,7 @@ impl Ctx {
         context.insert("show_prompt", &self.show_prompt);
         context.insert("prompt", &self.prompt);
 
-        let html = Tera::one_off(std::str::from_utf8(APP_HTML).unwrap(), &context, false)?;
+        let html = Tera::one_off(std::str::from_utf8(APP_HTML)?, &context, false)?;
         Ok(html)
     }
 }
