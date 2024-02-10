@@ -1,111 +1,82 @@
 use crate::{
     card::Card,
-    events::{
-        answer::Answer, distribute::Distribute, pass::Pass, select::Select, serve::Serve,
-        EventHandler,
-    },
-    game::{FieldKey, Game},
-    plugin::{LiveEvent, RenderConfig},
+    game::{FieldKey, Game, Prompt},
+    plugin::RenderConfig,
 };
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use tera::Tera;
 
 static APP_HTML: &[u8] = include_bytes!("templates/app.html");
 
-pub fn from_event(event: &LiveEvent) -> Result<Box<dyn EventHandler>> {
-    match event {
-        LiveEvent { event_name, .. } if event_name == "distribute" => Ok(Box::new(Distribute)),
-        LiveEvent {
-            event_name, value, ..
-        } if event_name == "select" => Ok(Box::new(Select {
-            field: value.get("field").unwrap().clone(),
-            card: Card::try_from(event.value.get("card").unwrap().as_str())?,
-        })),
-        LiveEvent {
-            event_name, value, ..
-        } if event_name == "answer" => Ok(Box::new(Answer {
-            answer: value.get("option").unwrap().to_string(),
-        })),
-        LiveEvent { event_name, .. } if event_name == "serve" => Ok(Box::new(Serve)),
-        LiveEvent { event_name, .. } if event_name == "pass" => Ok(Box::new(Pass)),
-        _ => Err(anyhow!("invalid event")),
-    }
+/// text, data, selected
+type DeckView = Vec<(String, String, bool)>;
+
+pub struct Ctx {
+    is_current: bool,
+    current: Option<String>,
+    trushes: DeckView,
+    excluded: DeckView,
+    river: DeckView,
+    hands: DeckView,
+    show_prompt: bool,
+    prompt: Vec<Prompt>,
 }
 
-pub fn render_game(game: &Game, config: &RenderConfig) -> Result<String> {
-    let mut context = tera::Context::new();
+impl Ctx {
+    fn into_deck_view(cards: &[Card], selects: &[Card]) -> DeckView {
+        cards
+            .iter()
+            .map(|c| (c.char().to_string(), c.to_string(), selects.contains(c)))
+            .collect()
+    }
 
-    let is_current = game.current == Some(config.player_id.clone());
-    context.insert("is_current", &is_current);
+    pub fn new(game: &Game, config: &RenderConfig) -> Self {
+        let is_current = game.current == Some(config.player_id.clone());
+        let selects = &game.selects[&config.player_id];
 
-    context.insert("current", &game.current);
+        let trushes =
+            Self::into_deck_view(&game.fields.get(&FieldKey::Trushes).unwrap().0, &selects);
+        let excluded =
+            Self::into_deck_view(&game.fields.get(&FieldKey::Excluded).unwrap().0, &selects);
+        let river = Self::into_deck_view(game.river.last().unwrap_or(&vec![]), &[]);
+        let hands = Self::into_deck_view(
+            &game.fields[&FieldKey::Hands(config.player_id.to_string())].0,
+            &selects,
+        );
 
-    let trushes = game
-        .fields
-        .get(&FieldKey::Trushes)
-        .unwrap()
-        .0
-        .iter()
-        .map(|c| {
-            (
-                c.char().to_string(),
-                c.to_string(),
-                game.selects[&config.player_id].contains(c),
-            )
-        })
-        .collect::<Vec<_>>();
-    context.insert("trushes", &trushes);
+        let show_prompt = game
+            .prompt
+            .last()
+            .map(|p| {
+                p.player_ids.contains(&config.player_id)
+                    && !game.answers.contains_key(&config.player_id)
+            })
+            .unwrap_or(false);
 
-    let excluded = game
-        .fields
-        .get(&FieldKey::Excluded)
-        .unwrap()
-        .0
-        .iter()
-        .map(|c| {
-            (
-                c.char().to_string(),
-                c.to_string(),
-                game.selects[&config.player_id].contains(c),
-            )
-        })
-        .collect::<Vec<_>>();
-    context.insert("excluded", &excluded);
+        Self {
+            is_current,
+            current: game.current.clone(),
+            trushes,
+            excluded,
+            river,
+            hands,
+            show_prompt,
+            prompt: game.prompt.clone(),
+        }
+    }
 
-    let river = game
-        .river
-        .last()
-        .cloned()
-        .unwrap_or(vec![])
-        .iter()
-        .map(|c| (c.char().to_string(), c.to_string()))
-        .collect::<Vec<_>>();
-    context.insert("river", &river);
+    pub fn render(&self) -> Result<String> {
+        let mut context = tera::Context::new();
+        context.insert("is_current", &self.is_current);
+        context.insert("current", &self.current);
+        context.insert("trushes", &self.trushes);
+        context.insert("excluded", &self.excluded);
+        context.insert("river", &self.river);
+        context.insert("hands", &self.hands);
+        context.insert("show_prompt", &self.show_prompt);
+        context.insert("prompt", &self.prompt);
 
-    let hands = game.fields[&FieldKey::Hands(config.player_id.to_string())]
-        .0
-        .iter()
-        .map(|c| {
-            (
-                c.char().to_string(),
-                c.to_string(),
-                game.selects[&config.player_id].contains(c),
-            )
-        })
-        .collect::<Vec<_>>();
-    context.insert("hands", &hands);
-
-    let show_prompt = game
-        .prompt
-        .last()
-        .map(|p| {
-            p.player_ids.contains(&config.player_id)
-                && !game.answers.contains_key(&config.player_id)
-        })
-        .unwrap_or(false);
-    context.insert("show_prompt", &show_prompt);
-    context.insert("prompt", &game.prompt);
-
-    let html = Tera::one_off(std::str::from_utf8(APP_HTML).unwrap(), &context, false)?;
-    Ok(html)
+        let html = Tera::one_off(std::str::from_utf8(APP_HTML).unwrap(), &context, false)?;
+        Ok(html)
+    }
 }

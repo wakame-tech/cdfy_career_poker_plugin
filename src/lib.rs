@@ -1,5 +1,6 @@
 use crate::{
-    game_view::from_event,
+    events::from_live_event,
+    game_view::Ctx,
     plugin::{GameConfig, LiveEvent, RenderConfig},
 };
 use anyhow::Result;
@@ -44,7 +45,7 @@ pub fn get_state(_: ()) -> FnResult<Option<Game>> {
 #[plugin_fn]
 pub fn handle_event(Json(event): Json<LiveEvent>) -> FnResult<()> {
     let mut game: Game = var::get("game")?.unwrap();
-    let handler = from_event(&event)?;
+    let handler = from_live_event(&event)?;
     handler.on(event.player_id, &mut game)?;
     var::set("game", &game)?;
     Ok(())
@@ -53,6 +54,7 @@ pub fn handle_event(Json(event): Json<LiveEvent>) -> FnResult<()> {
 #[plugin_fn]
 pub fn render(Json(config): Json<RenderConfig>) -> FnResult<String> {
     let game: Game = var::get("game")?.unwrap();
-    let html = game_view::render_game(&game, &config)?;
+    let ctx = Ctx::new(&game, &config);
+    let html = ctx.render()?;
     Ok(html)
 }
