@@ -4,6 +4,7 @@ use crate::{
 };
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
@@ -39,10 +40,14 @@ impl std::fmt::Display for FieldKey {
     }
 }
 
+#[serde_as]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Game {
     // game state
     pub prompt: Vec<Prompt>,
+    // workaround for "key must be a string" error
+    // https://stackoverflow.com/questions/51276896/how-do-i-use-serde-to-serialize-a-hashmap-with-structs-as-keys-to-json
+    #[serde_as(as = "Vec<(_, _)>")]
     pub fields: HashMap<FieldKey, Deck>,
     // river
     pub river: Vec<Vec<Card>>,
