@@ -1,4 +1,4 @@
-use super::{effect_card::EffectCard, EventHandler};
+use super::{effect_card::EffectCard, Event, EventHandler};
 use crate::{
     card::{card_ord, number},
     game::{FieldKey, Game, PromptKind},
@@ -13,7 +13,7 @@ pub struct Answer {
 }
 
 impl EventHandler for Answer {
-    fn on(&self, player_id: String, game: &mut Game) -> Result<()> {
+    fn on(&self, player_id: String, game: &mut Game) -> Result<Event> {
         let Some(prompt) = game.prompt.last().cloned() else {
             return Err(anyhow!("no prompt"));
         };
@@ -49,7 +49,7 @@ impl EventHandler for Answer {
             game.last_served_player_id = Some(player_id.to_string());
             game.on_end_turn()?;
         }
-        Ok(())
+        Ok(Event::None)
     }
 }
 
@@ -57,12 +57,12 @@ impl EventHandler for Answer {
 pub struct ValidatePromptSelect4;
 
 impl EventHandler for ValidatePromptSelect4 {
-    fn on(&self, player_id: String, game: &mut Game) -> Result<()> {
+    fn on(&self, player_id: String, game: &mut Game) -> Result<Event> {
         let n_cards = game.river.last().unwrap().len();
         if game.selects.get(&player_id).unwrap().len() != n_cards {
             return Err(anyhow!("please select {} cards in trushes", n_cards));
         }
-        Ok(())
+        Ok(Event::None)
     }
 }
 
@@ -70,7 +70,7 @@ impl EventHandler for ValidatePromptSelect4 {
 pub struct AnswerPromptSelect4;
 
 impl EventHandler for AnswerPromptSelect4 {
-    fn on(&self, player_id: String, game: &mut Game) -> Result<()> {
+    fn on(&self, player_id: String, game: &mut Game) -> Result<Event> {
         let cards = game.selects.get(&player_id).unwrap().clone();
         game.transfer(
             &FieldKey::Trushes,
@@ -78,7 +78,7 @@ impl EventHandler for AnswerPromptSelect4 {
             cards,
         )?;
         game.field_mut(&FieldKey::Hands(player_id))?.sort(card_ord);
-        Ok(())
+        Ok(Event::None)
     }
 }
 
@@ -86,12 +86,12 @@ impl EventHandler for AnswerPromptSelect4 {
 pub struct ValidatePromptSelect7;
 
 impl EventHandler for ValidatePromptSelect7 {
-    fn on(&self, player_id: String, game: &mut Game) -> Result<()> {
+    fn on(&self, player_id: String, game: &mut Game) -> Result<Event> {
         let n_cards = game.river.last().unwrap().len();
         if game.selects.get(&player_id).unwrap().len() != n_cards {
             return Err(anyhow!("please select {} cards in hands", n_cards));
         }
-        Ok(())
+        Ok(Event::None)
     }
 }
 
@@ -99,7 +99,7 @@ impl EventHandler for ValidatePromptSelect7 {
 pub struct AnswerPromptSelect7;
 
 impl EventHandler for AnswerPromptSelect7 {
-    fn on(&self, player_id: String, game: &mut Game) -> Result<()> {
+    fn on(&self, player_id: String, game: &mut Game) -> Result<Event> {
         let cards = game.selects.get(&player_id).unwrap().clone();
         let passer: String = game.get_relative_player(&player_id, -1);
         game.transfer(
@@ -108,7 +108,7 @@ impl EventHandler for AnswerPromptSelect7 {
             cards,
         )?;
         game.field_mut(&FieldKey::Hands(passer))?.sort(card_ord);
-        Ok(())
+        Ok(Event::None)
     }
 }
 
@@ -116,12 +116,12 @@ impl EventHandler for AnswerPromptSelect7 {
 pub struct ValidatePromptSelect13;
 
 impl EventHandler for ValidatePromptSelect13 {
-    fn on(&self, player_id: String, game: &mut Game) -> Result<()> {
+    fn on(&self, player_id: String, game: &mut Game) -> Result<Event> {
         let n_cards = game.river.last().unwrap().len();
         if game.selects.get(&player_id).unwrap().len() != n_cards {
             return Err(anyhow!("please select {} cards in excluded", n_cards));
         }
-        Ok(())
+        Ok(Event::None)
     }
 }
 
@@ -129,7 +129,7 @@ impl EventHandler for ValidatePromptSelect13 {
 pub struct AnswerPromptSelect13;
 
 impl EventHandler for AnswerPromptSelect13 {
-    fn on(&self, player_id: String, game: &mut Game) -> Result<()> {
+    fn on(&self, player_id: String, game: &mut Game) -> Result<Event> {
         let cards = game.selects.get(&player_id).unwrap().clone();
 
         game.transfer(
@@ -139,7 +139,7 @@ impl EventHandler for AnswerPromptSelect13 {
         )?;
         game.field_mut(&FieldKey::Hands(player_id.to_string()))?
             .sort(card_ord);
-        Ok(())
+        Ok(Event::None)
     }
 }
 
@@ -149,12 +149,12 @@ pub struct ValidatePromptSelectOneChance {
 }
 
 impl EventHandler for ValidatePromptSelectOneChance {
-    fn on(&self, player_id: String, game: &mut Game) -> Result<()> {
+    fn on(&self, player_id: String, game: &mut Game) -> Result<Event> {
         let serves = game.selects.get(&player_id).unwrap().clone();
         if self.answer == *"serve" && (serves.len() != 1 || number(&serves) != 1) {
             return Err(anyhow!("please select A"));
         }
-        Ok(())
+        Ok(Event::None)
     }
 }
 
@@ -162,7 +162,7 @@ impl EventHandler for ValidatePromptSelectOneChance {
 pub struct AnswerPromptSelectOneChance;
 
 impl EventHandler for AnswerPromptSelectOneChance {
-    fn on(&self, player_id: String, game: &mut Game) -> Result<()> {
+    fn on(&self, player_id: String, game: &mut Game) -> Result<Event> {
         let serves = game
             .river
             .last()
@@ -170,6 +170,6 @@ impl EventHandler for AnswerPromptSelectOneChance {
             .expect("river is empty on UseOneChance");
         let event = EffectCard { serves };
         event.on(player_id, game)?;
-        Ok(())
+        Ok(Event::None)
     }
 }

@@ -3,6 +3,7 @@ use crate::{
     deck::Deck,
 };
 use anyhow::{anyhow, Result};
+use extism_pdk::{FromBytesOwned, ToBytes};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use std::collections::{HashMap, HashSet};
@@ -68,6 +69,20 @@ pub struct Game {
     pub players: Vec<String>,
     pub selects: HashMap<String, Vec<Card>>,
     pub answers: HashMap<String, String>,
+}
+
+impl ToBytes<'_> for Game {
+    type Bytes = Vec<u8>;
+
+    fn to_bytes(&self) -> Result<Self::Bytes> {
+        Ok(serde_json::to_vec(self)?)
+    }
+}
+
+impl FromBytesOwned for Game {
+    fn from_bytes_owned(bytes: &[u8]) -> Result<Self> {
+        Ok(serde_json::from_slice(bytes)?)
+    }
 }
 
 impl Game {

@@ -1,4 +1,4 @@
-use super::EventHandler;
+use super::{Event, EventHandler};
 use crate::game::Game;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 pub struct Pass;
 
 impl EventHandler for Pass {
-    fn on(&self, player_id: String, game: &mut Game) -> Result<()> {
+    fn on(&self, player_id: String, game: &mut Game) -> Result<Event> {
         if let Some(prompt) = game.prompt.first() {
             if prompt.player_ids.contains(&player_id) && !game.answers.contains_key(&player_id) {
                 return Err(anyhow!("please answer"));
@@ -21,6 +21,6 @@ impl EventHandler for Pass {
             return Err(anyhow!("cannot pass because river is empty"));
         }
         game.on_end_turn()?;
-        Ok(())
+        Ok(Event::None)
     }
 }

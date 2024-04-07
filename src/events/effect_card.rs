@@ -1,4 +1,4 @@
-use super::EventHandler;
+use super::{Event, EventHandler};
 use crate::{
     card::{number, suits, Card},
     game::{FieldKey, Game, Prompt, PromptKind},
@@ -12,7 +12,7 @@ pub struct EffectCard {
 }
 
 impl EventHandler for EffectCard {
-    fn on(&self, player_id: String, game: &mut Game) -> Result<()> {
+    fn on(&self, player_id: String, game: &mut Game) -> Result<Event> {
         let serves = self.serves.clone();
         game.river_size = Some(serves.len());
 
@@ -24,7 +24,7 @@ impl EventHandler for EffectCard {
 
         let n = number(&serves);
         if game.effect_limits.contains(&n) {
-            return Ok(());
+            return Ok(Event::None);
         }
 
         let hands = game.field(&FieldKey::Hands(player_id.clone()))?;
@@ -33,7 +33,7 @@ impl EventHandler for EffectCard {
             4 => {
                 let trushes = game.field(&FieldKey::Trushes)?;
                 if hands.0.is_empty() || trushes.0.is_empty() {
-                    return Ok(());
+                    return Ok(Event::None);
                 }
                 let prompt = Prompt {
                     kind: PromptKind::Select4,
@@ -47,7 +47,7 @@ impl EventHandler for EffectCard {
             6 => {}
             7 => {
                 if hands.0.is_empty() {
-                    return Ok(());
+                    return Ok(Event::None);
                 }
                 let prompt = Prompt {
                     kind: PromptKind::Select7,
@@ -78,7 +78,7 @@ impl EventHandler for EffectCard {
             13 => {
                 let excluded = game.field(&FieldKey::Excluded)?;
                 if hands.0.is_empty() || excluded.0.is_empty() {
-                    return Ok(());
+                    return Ok(Event::None);
                 }
                 let prompt = Prompt {
                     kind: PromptKind::Select13,
@@ -94,6 +94,6 @@ impl EventHandler for EffectCard {
                 return Err(anyhow!("invalid number {}", n));
             }
         };
-        Ok(())
+        Ok(Event::None)
     }
 }

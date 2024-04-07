@@ -1,4 +1,4 @@
-use super::EventHandler;
+use super::{Event, EventHandler};
 use crate::{
     card::card_ord,
     deck::Deck,
@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 pub struct Distribute;
 
 impl EventHandler for Distribute {
-    fn on(&self, _player_id: String, game: &mut Game) -> Result<()> {
+    fn on(&self, _player_id: String, game: &mut Game) -> Result<Event> {
         if game.players.is_empty() {
             return Err(anyhow!("players is empty"));
         }
@@ -24,6 +24,6 @@ impl EventHandler for Distribute {
                 .insert(FieldKey::Hands(player_id.to_string()), decks[i].clone());
         }
         game.current = Some(game.players[0].clone());
-        Ok(())
+        Ok(Event::None)
     }
 }

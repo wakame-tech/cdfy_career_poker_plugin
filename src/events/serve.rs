@@ -1,4 +1,4 @@
-use super::{effect_card::EffectCard, EventHandler};
+use super::{effect_card::EffectCard, Event, EventHandler};
 use crate::{
     card::{cardinal, is_same_number, match_suits, number, suits, Card},
     deck::deck_ord,
@@ -13,13 +13,13 @@ pub struct ValidateServe {
 }
 
 impl EventHandler for ValidateServe {
-    fn on(&self, _player_id: String, game: &mut Game) -> Result<()> {
+    fn on(&self, _player_id: String, game: &mut Game) -> Result<Event> {
         if !is_same_number(&self.serves) {
             return Err(anyhow!("not same number"));
         }
         let Some(top) = game.river.last() else {
             // river is empty
-            return Ok(());
+            return Ok(Event::None);
         };
         // check ordering
         let ordering = if game.revoluted ^ game.turn_revoluted {
@@ -59,7 +59,7 @@ impl EventHandler for ValidateServe {
                 suits(&self.serves)
             ));
         }
-        Ok(())
+        Ok(Event::None)
     }
 }
 
@@ -67,7 +67,7 @@ impl EventHandler for ValidateServe {
 pub struct Serve;
 
 impl EventHandler for Serve {
-    fn on(&self, player_id: String, game: &mut Game) -> Result<()> {
+    fn on(&self, player_id: String, game: &mut Game) -> Result<Event> {
         if let Some(prompt) = game.prompt.first() {
             if prompt.player_ids.contains(&player_id) && !game.answers.contains_key(&player_id) {
                 return Err(anyhow!("please answer"));
@@ -125,6 +125,6 @@ impl EventHandler for Serve {
             game.last_served_player_id = Some(player_id.to_string());
             game.on_end_turn()?;
         }
-        Ok(())
+        Ok(Event::None)
     }
 }

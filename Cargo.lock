@@ -103,7 +103,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "cdfy_career_poker_plugin"
+name = "cdfy_plugin_career_poker"
 version = "0.1.0"
 dependencies = [
  "anyhow",

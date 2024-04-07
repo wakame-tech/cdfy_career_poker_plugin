@@ -1,7 +1,6 @@
 use crate::{
     card::Card,
     game::{FieldKey, Game, Prompt},
-    plugin::RenderConfig,
 };
 use anyhow::{anyhow, Result};
 use tera::Tera;
@@ -30,9 +29,9 @@ impl Ctx {
             .collect()
     }
 
-    pub fn new(game: &Game, config: &RenderConfig) -> Result<Self> {
-        let is_current = game.current == Some(config.player_id.clone());
-        let selects = &game.selects[&config.player_id];
+    pub fn new(game: &Game, player_id: String) -> Result<Self> {
+        let is_current = game.current == Some(player_id.clone());
+        let selects = &game.selects[&player_id];
 
         let trushes = Self::into_deck_view(
             &game
@@ -54,7 +53,7 @@ impl Ctx {
         let hands = Self::into_deck_view(
             &game
                 .fields
-                .get(&FieldKey::Hands(config.player_id.to_string()))
+                .get(&FieldKey::Hands(player_id.to_string()))
                 .ok_or(anyhow!("hands not found"))?
                 .0,
             &selects,
@@ -63,10 +62,7 @@ impl Ctx {
         let show_prompt = game
             .prompt
             .last()
-            .map(|p| {
-                p.player_ids.contains(&config.player_id)
-                    && !game.answers.contains_key(&config.player_id)
-            })
+            .map(|p| p.player_ids.contains(&player_id) && !game.answers.contains_key(&player_id))
             .unwrap_or(false);
 
         Ok(Self {

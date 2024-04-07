@@ -1,10 +1,6 @@
 use crate::game::Game;
-use crate::{
-    card::Card,
-    events::{answer::Answer, distribute::Distribute, pass::Pass, select::Select, serve::Serve},
-    plugin::LiveEvent,
-};
-use anyhow::{anyhow, Result};
+use anyhow::Result;
+use extism_pdk::ToBytes;
 
 pub mod answer;
 pub mod distribute;
@@ -13,26 +9,42 @@ pub mod pass;
 pub mod select;
 pub mod serve;
 
-pub trait EventHandler {
-    fn on(&self, player_id: String, game: &mut Game) -> Result<()>;
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(tag = "name", content = "value")]
+pub enum Event {
+    Distribute,
+    Select {
+        field: String,
+        card: String,
+    },
+    Answer {
+        option: String,
+    },
+    Serve,
+    Pass,
+    // buildin events
+    None,
+    Exit,
+    LaunchPlugin {
+        plugin_name: String,
+    },
+    PluginStarted {
+        state_id: String,
+    },
+    PluginFinished {
+        state_id: String,
+        value: serde_json::Value,
+    },
 }
 
-pub fn from_live_event(event: &LiveEvent) -> Result<Box<dyn EventHandler>> {
-    match event {
-        LiveEvent { event_name, .. } if event_name == "distribute" => Ok(Box::new(Distribute)),
-        LiveEvent {
-            event_name, value, ..
-        } if event_name == "select" => Ok(Box::new(Select {
-            field: value.get("field").unwrap().clone(),
-            card: Card::try_from(event.value.get("card").unwrap().as_str())?,
-        })),
-        LiveEvent {
-            event_name, value, ..
-        } if event_name == "answer" => Ok(Box::new(Answer {
-            answer: value.get("option").unwrap().to_string(),
-        })),
-        LiveEvent { event_name, .. } if event_name == "serve" => Ok(Box::new(Serve)),
-        LiveEvent { event_name, .. } if event_name == "pass" => Ok(Box::new(Pass)),
-        _ => Err(anyhow!("invalid event")),
+impl ToBytes<'_> for Event {
+    type Bytes = Vec<u8>;
+
+    fn to_bytes(&self) -> Result<Self::Bytes, anyhow::Error> {
+        Ok(serde_json::to_vec(self)?)
     }
+}
+
+pub trait EventHandler {
+    fn on(&self, player_id: String, game: &mut Game) -> Result<Event>;
 }

@@ -1,4 +1,4 @@
-use super::EventHandler;
+use super::{Event, EventHandler};
 use crate::{card::Card, game::Game};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -10,7 +10,7 @@ pub struct Select {
 }
 
 impl EventHandler for Select {
-    fn on(&self, player_id: String, game: &mut Game) -> Result<()> {
+    fn on(&self, player_id: String, game: &mut Game) -> Result<Event> {
         if game.selects.get(&player_id).unwrap().contains(&self.card) {
             let index = game
                 .selects
@@ -26,6 +26,6 @@ impl EventHandler for Select {
                 .unwrap()
                 .push(self.card.clone());
         }
-        Ok(())
+        Ok(Event::None)
     }
 }

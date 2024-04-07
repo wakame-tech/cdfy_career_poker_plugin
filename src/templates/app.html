@@ -1,4 +1,4 @@
-<button class="p-2 bg-blue-500 text-white rounded" phx-click="distribute">distribute</button>
+<button class="p-2 bg-blue-500 text-white rounded" phx-click="Distribute">distribute</button>
 
 <div class="select-none">
     <p>current: {{ current }}</p>
@@ -8,7 +8,7 @@
         <h3 class="font-bold text-xl">prompt</h3>
         <p>{{prompt[0].question}}</p>
         {% for option in prompt[0].options %}
-        <button class="p-2 bg-blue-500 text-white rounded" phx-click="answer" phx-value-option="{{ option }}">
+        <button class="p-2 bg-blue-500 text-white rounded" phx-click="Answer" phx-value-option="{{ option }}">
             {{ option }}</button>
         {% endfor %}
     </div>
@@ -16,7 +16,7 @@
 
     <p>hands</p>
     {% for card in hands %}
-    <span class="h-24" phx-click="select" phx-value-field="hands" phx-value-card="{{ card[1] }}">
+    <span class="h-24" phx-click="Select" phx-value-field="hands" phx-value-card="{{ card[1] }}">
         {% if card[2] %}
         <span class="text-4xl text-red-500">{{card[0]}}</span>
         {% else %}
@@ -27,8 +27,8 @@
 
     {% if is_current %}
     <div>
-        <button class="p-2 bg-blue-500 text-white rounded" phx-click="serve">serve</button>
-        <button class="p-2 bg-blue-500 text-white rounded" phx-click="pass">pass</button>
+        <button class="p-2 bg-blue-500 text-white rounded" phx-click="Serve">serve</button>
+        <button class="p-2 bg-blue-500 text-white rounded" phx-click="Pass">pass</button>
     </div>
     {% endif %}
 
@@ -41,7 +41,7 @@
 
     <p>trushes</p>
     {% for card in trushes %}
-    <span class="leading-4 text-4xl" phx-click="select" phx-value-field="trushes" phx-value-card="{{ card[1] }}">
+    <span class="leading-4 text-4xl" phx-click="Select" phx-value-field="trushes" phx-value-card="{{ card[1] }}">
         {% if card[2] %}
         <span class="text-4xl text-red-500">{{card[0]}}</span>
         {% else %}
@@ -52,7 +52,7 @@
 
     <p>excludes</p>
     {% for card in excluded %}
-    <span class="leading-4 text-4xl" phx-click="select" phx-value-field="excludes" phx-value-card="{{ card[1] }}">
+    <span class="leading-4 text-4xl" phx-click="Select" phx-value-field="excludes" phx-value-card="{{ card[1] }}">
         {% if card[2] %}
         <span class="text-4xl text-red-500">{{card[0]}}</span>
         {% else %}
