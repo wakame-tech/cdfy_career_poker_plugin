@@ -35,6 +35,7 @@ impl EventHandler for Answer {
             == game.answers.keys().collect::<HashSet<_>>();
         if all_answered {
             game.answers.clear();
+            game.prompt.pop();
             let answer_prompt: Box<dyn EventHandler> = match prompt.kind {
                 PromptKind::Select4 => Box::new(AnswerPromptSelect4),
                 PromptKind::Select7 => Box::new(AnswerPromptSelect7),
