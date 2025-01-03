@@ -1,4 +1,4 @@
-use super::{effect_card::EffectCard, Event, EventHandler};
+use super::{Event, EventHandler};
 use crate::{
     card::{cardinal, is_same_number, match_suits, number, suits, Card},
     deck::deck_ord,
@@ -59,6 +59,98 @@ impl EventHandler for ValidateServe {
                 suits(&self.serves)
             ));
         }
+        Ok(Event::None)
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EffectCard {
+    pub serves: Vec<Card>,
+}
+
+impl EventHandler for EffectCard {
+    fn on(&self, player_id: String, game: &mut Game) -> Result<Event> {
+        let serves = self.serves.clone();
+        game.river_size = Some(serves.len());
+
+        if serves.len() == 4 {
+            game.ord_reversed = !game.ord_reversed;
+        }
+
+        game.river_size = Some(serves.len());
+
+        let n = number(&serves);
+        if game.effect_bans.contains(&n) {
+            return Ok(Event::None);
+        }
+
+        let hands = game.field(&FieldKey::Hands(player_id.clone()))?;
+        match n {
+            3 => game.effect_bans.extend(1..=13),
+            4 => {
+                let trashes = game.field(&FieldKey::Trashes)?;
+                if hands.0.is_empty() || trashes.0.is_empty() {
+                    return Ok(Event::None);
+                }
+                let prompt = Prompt {
+                    kind: PromptKind::Select4,
+                    player_ids: vec![player_id.to_string()],
+                    question: "select cards from trashes".to_string(),
+                    options: vec!["ok".to_string()],
+                };
+                game.prompts.push(prompt);
+            }
+            5 => {}
+            6 => {}
+            7 => {
+                if hands.0.is_empty() {
+                    return Ok(Event::None);
+                }
+                let prompt = Prompt {
+                    kind: PromptKind::Select7,
+                    player_ids: vec![player_id.to_string()],
+                    question: "select cards from hands".to_string(),
+                    options: vec!["ok".to_string()],
+                };
+                game.prompts.push(prompt);
+            }
+            8 => {}
+            9 => {
+                game.river_size = match game.river_size {
+                    Some(1) => Some(3),
+                    Some(3) => Some(1),
+                    n => n,
+                };
+            }
+            10 => {
+                game.effect_bans.extend(1..10);
+            }
+            11 => {
+                game.turn_ord_reversed = true;
+            }
+            12 => {
+                game.is_step = true;
+                game.suit_bans = suits(&serves);
+            }
+            13 => {
+                let excluded = game.field(&FieldKey::Excluded)?;
+                if hands.0.is_empty() || excluded.0.is_empty() {
+                    return Ok(Event::None);
+                }
+                let prompt = Prompt {
+                    kind: PromptKind::Select13,
+                    player_ids: vec![player_id.to_string()],
+                    question: "select cards from excluded".to_string(),
+                    options: vec!["ok".to_string()],
+                };
+                game.prompts.push(prompt);
+            }
+            1 => {}
+            2 => {}
+            _ => {
+                return Err(anyhow!("invalid number {}", n));
+            }
+        };
         Ok(Event::None)
     }
 }

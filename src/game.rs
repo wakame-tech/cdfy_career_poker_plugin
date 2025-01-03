@@ -1,12 +1,26 @@
 use crate::{
     card::{number, Card, Suit},
     deck::Deck,
+    events::Event,
 };
 use anyhow::{anyhow, Result};
-use extism_pdk::{FromBytesOwned, ToBytes};
+use extism_pdk::*;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use std::collections::{HashMap, HashSet};
+
+#[derive(Serialize, Deserialize, ToBytes, FromBytes)]
+#[encoding(Json)]
+pub struct GameAndEvent {
+    pub game: Game,
+    pub event: Event,
+}
+
+impl From<(Game, Event)> for GameAndEvent {
+    fn from((game, event): (Game, Event)) -> Self {
+        Self { game, event }
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
 pub enum PromptKind {
@@ -42,7 +56,8 @@ impl std::fmt::Display for FieldKey {
 }
 
 #[serde_as]
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToBytes, FromBytes)]
+#[encoding(Json)]
 pub struct Game {
     // game state
     pub prompts: Vec<Prompt>,
@@ -68,20 +83,6 @@ pub struct Game {
     pub players: Vec<String>,
     pub selects: HashMap<String, Vec<Card>>,
     pub answers: HashMap<String, String>,
-}
-
-impl ToBytes<'_> for Game {
-    type Bytes = Vec<u8>;
-
-    fn to_bytes(&self) -> Result<Self::Bytes> {
-        Ok(serde_json::to_vec(self)?)
-    }
-}
-
-impl FromBytesOwned for Game {
-    fn from_bytes_owned(bytes: &[u8]) -> Result<Self> {
-        Ok(serde_json::from_slice(bytes)?)
-    }
 }
 
 impl Game {

@@ -5,7 +5,7 @@ use crate::{
 use anyhow::{anyhow, Result};
 use tera::Tera;
 
-static APP_HTML: &[u8] = include_bytes!("templates/app.html");
+static APP_HTML: &[u8] = include_bytes!("templates/htmx.html");
 
 /// text, data, selected
 type DeckView = Vec<(String, String, bool)>;

@@ -6,7 +6,7 @@ use events::{
     EventHandler,
 };
 use extism_pdk::*;
-use game::Game;
+use game::{Game, GameAndEvent};
 
 pub mod card;
 pub mod deck;
@@ -21,10 +21,9 @@ pub struct GameConfig {
 }
 
 #[plugin_fn]
-pub fn init_game(Json(config): Json<GameConfig>) -> FnResult<()> {
+pub fn init_game(Json(config): Json<GameConfig>) -> FnResult<Game> {
     let game = Game::new(config.player_ids);
-    var::set("game", &game)?;
-    Ok(())
+    Ok(game)
 }
 
 // debug
@@ -36,6 +35,7 @@ pub fn get_state(_: ()) -> FnResult<Game> {
 
 #[derive(serde::Deserialize)]
 pub struct HandleEventArg {
+    pub game: Game,
     pub player_id: String,
     pub event: Event,
 }
@@ -58,26 +58,28 @@ pub fn into_event_handler(event: &Event) -> anyhow::Result<Option<Box<dyn EventH
 
 #[plugin_fn]
 pub fn handle_event(
-    Json(HandleEventArg { player_id, event }): Json<HandleEventArg>,
-) -> FnResult<Event> {
-    let mut game: Game = var::get("game")?.ok_or(anyhow!("Game not found"))?;
+    Json(HandleEventArg {
+        mut game,
+        player_id,
+        event,
+    }): Json<HandleEventArg>,
+) -> FnResult<GameAndEvent> {
     let Some(handler) = into_event_handler(&event)? else {
-        return Ok(Event::None);
+        return Ok((game, Event::None).into());
     };
     let res = handler.on(player_id, &mut game)?;
-    var::set("game", &game)?;
-    Ok(res)
+    Ok((game, res).into())
 }
 
 #[derive(serde::Deserialize)]
 pub struct RenderConfig {
+    game: Game,
     pub player_id: String,
 }
 
 #[plugin_fn]
-pub fn render(Json(config): Json<RenderConfig>) -> FnResult<String> {
-    let game: Game = var::get("game")?.ok_or(anyhow!("Game not found"))?;
-    let ctx = Ctx::new(&game, config.player_id)?;
+pub fn render(Json(RenderConfig { game, player_id }): Json<RenderConfig>) -> FnResult<String> {
+    let ctx = Ctx::new(&game, player_id)?;
     let html = ctx.render()?;
     Ok(html)
 }

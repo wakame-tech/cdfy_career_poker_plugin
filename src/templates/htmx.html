@@ -1,0 +1,76 @@
+<script src="https://unpkg.com/htmx.org@2.0.4"
+    integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+"
+    crossorigin="anonymous"></script>
+<script src="https://unpkg.com/htmx.org@1.9.12/dist/ext/json-enc.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+
+<div hx-ext="json-enc" hx-target="body">
+    <button class="p-2 bg-blue-500 text-white rounded" hx-post="/event"
+        hx-vals='{"name": "Distribute"}'>distribute</button>
+
+    <div class="select-none">
+        <p>current: {{ current }}</p>
+
+        {% if show_prompt %}
+        <div class="p-2 border border-1 rounded bg-blue-100">
+            <h3 class="font-bold text-xl">prompt</h3>
+            <p>{{prompt[0].question}}</p>
+            {% for option in prompt[0].options %}
+            <button class="p-2 bg-blue-500 text-white rounded" hx-post="/event"
+                hx-vals='{"name": "Answer", "value": { "option": "{{ option }}"} }'>
+                {{ option }}</button>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <p>hands</p>
+        {% for card in hands %}
+        <span class="h-24" hx-post="/event" hx-vals='{"name": "Select", "field": "hands", "card": "{{ card[1] }}" }'>
+            {% if card[2] %}
+            <span class="text-4xl text-red-500">{{card[0]}}</span>
+            {% else %}
+            <span class="text-4xl">{{card[0]}}</span>
+            {% endif %}
+        </span>
+        {% endfor %}
+
+        {% if is_current %}
+        <div>
+            <button class="p-2 bg-blue-500 text-white rounded" hx-post="/event"
+                hx-vals='{"name": "Serve"}'>serve</button>
+            <button class="p-2 bg-blue-500 text-white rounded" hx-post="/event" hx-vals='{"name": "Pass"}'>pass</button>
+        </div>
+        {% endif %}
+
+        <p>river</p>
+        {% for card in river %}
+        <span class="leading-4 text-4xl">
+            {{card[0]}}
+        </span>
+        {% endfor %}
+
+        <p>trashes</p>
+        {% for card in trashes %}
+        <span class="leading-4 text-4xl" hx-post="/event"
+            hx-vals='{"name": "Select", "field": "trashes", "card": "{{ card[1] }}" }'>
+            {% if card[2] %}
+            <span class="text-4xl text-red-500">{{card[0]}}</span>
+            {% else %}
+            <span class="text-4xl">{{card[0]}}</span>
+            {% endif %}
+        </span>
+        {% endfor %}
+
+        <p>excludes</p>
+        {% for card in excluded %}
+        <span class="leading-4 text-4xl" hx-post="/event"
+            hx-vals='{"name": "Select", "field": "excludes", "card": "{{ card[1] }}" }'>
+            {% if card[2] %}
+            <span class="text-4xl text-red-500">{{card[0]}}</span>
+            {% else %}
+            <span class="text-4xl">{{card[0]}}</span>
+            {% endif %}
+        </span>
+        {% endfor %}
+    </div>
+</div>

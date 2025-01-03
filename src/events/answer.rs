@@ -1,4 +1,4 @@
-use super::{effect_card::EffectCard, Event, EventHandler};
+use super::{serve::EffectCard, Event, EventHandler};
 use crate::{
     card::{card_ord, number},
     game::{FieldKey, Game, PromptKind},
