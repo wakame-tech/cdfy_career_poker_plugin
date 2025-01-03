@@ -17,31 +17,31 @@ impl EventHandler for EffectCard {
         game.river_size = Some(serves.len());
 
         if serves.len() == 4 {
-            game.revoluted = !game.revoluted;
+            game.ord_reversed = !game.ord_reversed;
         }
 
         game.river_size = Some(serves.len());
 
         let n = number(&serves);
-        if game.effect_limits.contains(&n) {
+        if game.effect_bans.contains(&n) {
             return Ok(Event::None);
         }
 
         let hands = game.field(&FieldKey::Hands(player_id.clone()))?;
         match n {
-            3 => game.effect_limits.extend(1..=13),
+            3 => game.effect_bans.extend(1..=13),
             4 => {
-                let trushes = game.field(&FieldKey::Trushes)?;
-                if hands.0.is_empty() || trushes.0.is_empty() {
+                let trashes = game.field(&FieldKey::Trashes)?;
+                if hands.0.is_empty() || trashes.0.is_empty() {
                     return Ok(Event::None);
                 }
                 let prompt = Prompt {
                     kind: PromptKind::Select4,
                     player_ids: vec![player_id.to_string()],
-                    question: "select cards from trushes".to_string(),
+                    question: "select cards from trashes".to_string(),
                     options: vec!["ok".to_string()],
                 };
-                game.prompt.push(prompt);
+                game.prompts.push(prompt);
             }
             5 => {}
             6 => {}
@@ -55,7 +55,7 @@ impl EventHandler for EffectCard {
                     question: "select cards from hands".to_string(),
                     options: vec!["ok".to_string()],
                 };
-                game.prompt.push(prompt);
+                game.prompts.push(prompt);
             }
             8 => {}
             9 => {
@@ -66,14 +66,14 @@ impl EventHandler for EffectCard {
                 };
             }
             10 => {
-                game.effect_limits.extend(1..10);
+                game.effect_bans.extend(1..10);
             }
             11 => {
-                game.turn_revoluted = true;
+                game.turn_ord_reversed = true;
             }
             12 => {
                 game.is_step = true;
-                game.suit_limits = suits(&serves);
+                game.suit_bans = suits(&serves);
             }
             13 => {
                 let excluded = game.field(&FieldKey::Excluded)?;
@@ -86,7 +86,7 @@ impl EventHandler for EffectCard {
                     question: "select cards from excluded".to_string(),
                     options: vec!["ok".to_string()],
                 };
-                game.prompt.push(prompt);
+                game.prompts.push(prompt);
             }
             1 => {}
             2 => {}

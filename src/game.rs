@@ -26,7 +26,7 @@ pub struct Prompt {
 
 #[derive(Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FieldKey {
-    Trushes,
+    Trashes,
     Excluded,
     Hands(String),
 }
@@ -34,7 +34,7 @@ pub enum FieldKey {
 impl std::fmt::Display for FieldKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            FieldKey::Trushes => write!(f, "trushes"),
+            FieldKey::Trashes => write!(f, "trashes"),
             FieldKey::Excluded => write!(f, "excluded"),
             FieldKey::Hands(id) => write!(f, "{}", id),
         }
@@ -45,7 +45,7 @@ impl std::fmt::Display for FieldKey {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Game {
     // game state
-    pub prompt: Vec<Prompt>,
+    pub prompts: Vec<Prompt>,
     // workaround for "key must be a string" error
     // https://stackoverflow.com/questions/51276896/how-do-i-use-serde-to-serialize-a-hashmap-with-structs-as-keys-to-json
     #[serde_as(as = "Vec<(_, _)>")]
@@ -53,16 +53,15 @@ pub struct Game {
     // river
     pub river: Vec<Vec<Card>>,
     pub river_size: Option<usize>,
-    pub suit_limits: HashSet<Suit>,
+    pub suit_bans: HashSet<Suit>,
     /// a number includes `effect_limits` ignore effect
-    pub effect_limits: HashSet<u8>,
+    pub effect_bans: HashSet<u8>,
     /// card strength is reversed until the river is reset
-    pub turn_revoluted: bool,
+    pub turn_ord_reversed: bool,
     /// when `is_step` is true, delta of previous cards number must be 1
     pub is_step: bool,
-    /// when `revoluted` is true, card strength is reversed
-    pub revoluted: bool,
-
+    /// when true, card strength is reversed
+    pub ord_reversed: bool,
     pub current: Option<String>,
     pub last_served_player_id: Option<String>,
     // player state
@@ -91,20 +90,20 @@ impl Game {
             .iter()
             .map(|id| (FieldKey::Hands(id.clone()), Deck::new(vec![])))
             .collect::<HashMap<_, _>>();
-        fields.insert(FieldKey::Trushes, Deck::new(vec![]));
+        fields.insert(FieldKey::Trashes, Deck::new(vec![]));
         fields.insert(FieldKey::Excluded, Deck::new(vec![]));
 
         Self {
-            prompt: vec![],
+            prompts: vec![],
             fields,
 
             river: vec![],
             river_size: None,
-            suit_limits: HashSet::new(),
-            effect_limits: HashSet::new(),
-            turn_revoluted: false,
+            suit_bans: HashSet::new(),
+            effect_bans: HashSet::new(),
+            turn_ord_reversed: false,
             is_step: false,
-            revoluted: false,
+            ord_reversed: false,
 
             current: None,
             last_served_player_id: None,
@@ -165,9 +164,9 @@ impl Game {
         self.river.clear();
 
         self.river_size = None;
-        self.suit_limits = HashSet::new();
-        self.effect_limits = HashSet::new();
-        self.turn_revoluted = false;
+        self.suit_bans = HashSet::new();
+        self.effect_bans = HashSet::new();
+        self.turn_ord_reversed = false;
         self.is_step = false;
 
         Ok(())
@@ -188,19 +187,19 @@ impl Game {
 
         // next player
         let skips = match top {
-            _ if number(top) == 5 && !self.effect_limits.contains(&5) => top.len() as i32 + 1,
-            _ if number(top) == 8 && !self.effect_limits.contains(&8) => 0,
-            _ if number(top) == 1 && !self.effect_limits.contains(&1) => 0,
+            _ if number(top) == 5 && !self.effect_bans.contains(&5) => top.len() as i32 + 1,
+            _ if number(top) == 8 && !self.effect_bans.contains(&8) => 0,
+            _ if number(top) == 1 && !self.effect_bans.contains(&1) => 0,
             _ => 1,
         };
         self.current = Some(self.get_relative_player(&player_id, skips));
 
         // flush
         if self.current == self.last_served_player_id {
-            let to = if number(top) == 2 && !self.effect_limits.contains(&2) {
+            let to = if number(top) == 2 && !self.effect_bans.contains(&2) {
                 FieldKey::Excluded
             } else {
-                FieldKey::Trushes
+                FieldKey::Trashes
             };
             self.flush_river(&to)?;
         }

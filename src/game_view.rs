@@ -13,7 +13,7 @@ type DeckView = Vec<(String, String, bool)>;
 pub struct Ctx {
     is_current: bool,
     current: Option<String>,
-    trushes: DeckView,
+    trashes: DeckView,
     excluded: DeckView,
     river: DeckView,
     hands: DeckView,
@@ -33,11 +33,11 @@ impl Ctx {
         let is_current = game.current == Some(player_id.clone());
         let selects = &game.selects[&player_id];
 
-        let trushes = Self::into_deck_view(
+        let trashes = Self::into_deck_view(
             &game
                 .fields
-                .get(&FieldKey::Trushes)
-                .ok_or(anyhow!("trushes not found"))?
+                .get(&FieldKey::Trashes)
+                .ok_or(anyhow!("trashes not found"))?
                 .0,
             &selects,
         );
@@ -60,7 +60,7 @@ impl Ctx {
         );
 
         let show_prompt = game
-            .prompt
+            .prompts
             .last()
             .map(|p| p.player_ids.contains(&player_id) && !game.answers.contains_key(&player_id))
             .unwrap_or(false);
@@ -68,12 +68,12 @@ impl Ctx {
         Ok(Self {
             is_current,
             current: game.current.clone(),
-            trushes,
+            trashes,
             excluded,
             river,
             hands,
             show_prompt,
-            prompt: game.prompt.clone(),
+            prompt: game.prompts.clone(),
         })
     }
 
@@ -81,7 +81,7 @@ impl Ctx {
         let mut context = tera::Context::new();
         context.insert("is_current", &self.is_current);
         context.insert("current", &self.current);
-        context.insert("trushes", &self.trushes);
+        context.insert("trashes", &self.trashes);
         context.insert("excluded", &self.excluded);
         context.insert("river", &self.river);
         context.insert("hands", &self.hands);

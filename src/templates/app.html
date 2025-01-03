@@ -39,9 +39,9 @@
     </span>
     {% endfor %}
 
-    <p>trushes</p>
-    {% for card in trushes %}
-    <span class="leading-4 text-4xl" phx-click="Select" phx-value-field="trushes" phx-value-card="{{ card[1] }}">
+    <p>trashes</p>
+    {% for card in trashes %}
+    <span class="leading-4 text-4xl" phx-click="Select" phx-value-field="trashes" phx-value-card="{{ card[1] }}">
         {% if card[2] %}
         <span class="text-4xl text-red-500">{{card[0]}}</span>
         {% else %}

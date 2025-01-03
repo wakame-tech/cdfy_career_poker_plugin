@@ -22,7 +22,7 @@ impl EventHandler for ValidateServe {
             return Ok(Event::None);
         };
         // check ordering
-        let ordering = if game.revoluted ^ game.turn_revoluted {
+        let ordering = if game.ord_reversed ^ game.turn_ord_reversed {
             deck_ord(&self.serves, top).reverse()
         } else {
             deck_ord(&self.serves, top)
@@ -33,7 +33,7 @@ impl EventHandler for ValidateServe {
         // check river size
         let river_size = game.river_size.unwrap();
         let expected_river_size = match number(&self.serves) {
-            9 if !game.effect_limits.contains(&9) => match river_size {
+            9 if !game.effect_bans.contains(&9) => match river_size {
                 1 => 3,
                 3 => 1,
                 n => n,
@@ -52,10 +52,10 @@ impl EventHandler for ValidateServe {
             return Err(anyhow!("must be step"));
         }
         // check suits
-        if !game.suit_limits.is_empty() && !match_suits(top, &self.serves) {
+        if !game.suit_bans.is_empty() && !match_suits(top, &self.serves) {
             return Err(anyhow!(
                 "expected suits {:?} but {:?}",
-                game.suit_limits,
+                game.suit_bans,
                 suits(&self.serves)
             ));
         }
@@ -68,7 +68,7 @@ pub struct Serve;
 
 impl EventHandler for Serve {
     fn on(&self, player_id: String, game: &mut Game) -> Result<Event> {
-        if let Some(prompt) = game.prompt.first() {
+        if let Some(prompt) = game.prompts.first() {
             if prompt.player_ids.contains(&player_id) && !game.answers.contains_key(&player_id) {
                 return Err(anyhow!("please answer"));
             }
@@ -108,17 +108,17 @@ impl EventHandler for Serve {
             .cloned()
             .collect::<Vec<_>>();
 
-        if !game.effect_limits.contains(&1) && !has_1_player_ids.is_empty() {
+        if !game.effect_bans.contains(&1) && !has_1_player_ids.is_empty() {
             let prompt = Prompt {
                 kind: PromptKind::UseOneChance,
                 player_ids: has_1_player_ids,
                 question: "select A if use one chance".to_string(),
                 options: vec!["serve".to_string(), "skip".to_string()],
             };
-            game.prompt.push(prompt);
+            game.prompts.push(prompt);
         }
         // end phase
-        if game.prompt.is_empty() {
+        if game.prompts.is_empty() {
             let player_id = game.current.clone().unwrap();
             let event = EffectCard { serves };
             event.on(player_id.clone(), game)?;

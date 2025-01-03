@@ -14,7 +14,7 @@ pub struct Answer {
 
 impl EventHandler for Answer {
     fn on(&self, player_id: String, game: &mut Game) -> Result<Event> {
-        let Some(prompt) = game.prompt.last().cloned() else {
+        let Some(prompt) = game.prompts.last().cloned() else {
             return Err(anyhow!("no prompt"));
         };
         // validate answer
@@ -35,7 +35,7 @@ impl EventHandler for Answer {
             == game.answers.keys().collect::<HashSet<_>>();
         if all_answered {
             game.answers.clear();
-            game.prompt.pop();
+            game.prompts.pop();
             let answer_prompt: Box<dyn EventHandler> = match prompt.kind {
                 PromptKind::Select4 => Box::new(AnswerPromptSelect4),
                 PromptKind::Select7 => Box::new(AnswerPromptSelect7),
@@ -61,7 +61,7 @@ impl EventHandler for ValidatePromptSelect4 {
     fn on(&self, player_id: String, game: &mut Game) -> Result<Event> {
         let n_cards = game.river.last().unwrap().len();
         if game.selects.get(&player_id).unwrap().len() != n_cards {
-            return Err(anyhow!("please select {} cards in trushes", n_cards));
+            return Err(anyhow!("please select {} cards in trashes", n_cards));
         }
         Ok(Event::None)
     }
@@ -74,7 +74,7 @@ impl EventHandler for AnswerPromptSelect4 {
     fn on(&self, player_id: String, game: &mut Game) -> Result<Event> {
         let cards = game.selects.get(&player_id).unwrap().clone();
         game.transfer(
-            &FieldKey::Trushes,
+            &FieldKey::Trashes,
             &FieldKey::Hands(player_id.clone()),
             cards,
         )?;

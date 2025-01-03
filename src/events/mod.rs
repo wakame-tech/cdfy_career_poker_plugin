@@ -22,7 +22,7 @@ pub enum Event {
     },
     Serve,
     Pass,
-    // buildin events
+    // builtin events
     None,
     Exit,
     LaunchPlugin {

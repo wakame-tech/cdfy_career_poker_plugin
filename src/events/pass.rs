@@ -8,7 +8,7 @@ pub struct Pass;
 
 impl EventHandler for Pass {
     fn on(&self, player_id: String, game: &mut Game) -> Result<Event> {
-        if let Some(prompt) = game.prompt.first() {
+        if let Some(prompt) = game.prompts.first() {
             if prompt.player_ids.contains(&player_id) && !game.answers.contains_key(&player_id) {
                 return Err(anyhow!("please answer"));
             }
