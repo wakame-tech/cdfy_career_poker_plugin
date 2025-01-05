@@ -11,21 +11,7 @@ pub struct Select {
 
 impl EventHandler for Select {
     fn on(&self, player_id: String, game: &mut Game) -> Result<Event> {
-        if game.selects.get(&player_id).unwrap().contains(&self.card) {
-            let index = game
-                .selects
-                .get(&player_id)
-                .unwrap()
-                .iter()
-                .position(|c| c == &self.card)
-                .unwrap();
-            game.selects.get_mut(&player_id).unwrap().remove(index);
-        } else {
-            game.selects
-                .get_mut(&player_id)
-                .unwrap()
-                .push(self.card.clone());
-        }
+        game.toggle_select(&player_id, self.card.clone())?;
         Ok(Event::None)
     }
 }

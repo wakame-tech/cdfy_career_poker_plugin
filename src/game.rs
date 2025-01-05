@@ -129,6 +129,16 @@ impl Game {
         Ok(deck)
     }
 
+    pub fn toggle_select(&mut self, player_id: &str, card: Card) -> Result<()> {
+        let selects = self.selects.get_mut(player_id).unwrap();
+        if let Some(index) = selects.iter().position(|c| c == &card) {
+            selects.remove(index);
+        } else {
+            selects.push(card);
+        }
+        Ok(())
+    }
+
     pub fn transfer(&mut self, from: &FieldKey, to: &FieldKey, cards: Vec<Card>) -> Result<()> {
         self.field_mut(from)?.remove(&cards)?;
         self.field_mut(to)?.0.extend(cards.to_vec());
