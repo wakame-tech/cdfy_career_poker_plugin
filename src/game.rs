@@ -1,26 +1,12 @@
 use crate::{
-    card::{number, Card, Suit},
+    card::{Card, Suit},
     deck::Deck,
-    events::Event,
 };
 use anyhow::{anyhow, Result};
 use extism_pdk::*;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use std::collections::{HashMap, HashSet};
-
-#[derive(Serialize, Deserialize, ToBytes, FromBytes)]
-#[encoding(Json)]
-pub struct GameAndEvent {
-    pub game: Game,
-    pub event: Event,
-}
-
-impl From<(Game, Event)> for GameAndEvent {
-    fn from((game, event): (Game, Event)) -> Self {
-        Self { game, event }
-    }
-}
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
 pub enum PromptKind {
@@ -167,53 +153,5 @@ impl Game {
             .unwrap();
         let index = ((index as i32 + d).rem_euclid(active_player_ids.len() as i32)) as usize;
         active_player_ids[index].clone()
-    }
-
-    fn flush_river(&mut self, to: &FieldKey) -> Result<()> {
-        let cards = self.river.iter().flatten().cloned().collect::<Vec<_>>();
-        self.field_mut(to)?.0.extend(cards);
-        self.river.clear();
-
-        self.river_size = None;
-        self.suit_bans = HashSet::new();
-        self.effect_bans = HashSet::new();
-        self.turn_ord_reversed = false;
-        self.is_step = false;
-
-        Ok(())
-    }
-
-    pub fn on_end_turn(&mut self) -> Result<()> {
-        let player_id = self.current.clone().unwrap();
-
-        let hand = self.field(&FieldKey::Hands(player_id.clone()))?;
-        if hand.0.is_empty() && self.active_player_ids().len() == 1 {
-            return Err(anyhow!("end"));
-        }
-
-        let top = self
-            .river
-            .last()
-            .expect("river must not be empty when end turn");
-
-        // next player
-        let skips = match top {
-            _ if number(top) == 5 && !self.effect_bans.contains(&5) => top.len() as i32 + 1,
-            _ if number(top) == 8 && !self.effect_bans.contains(&8) => 0,
-            _ if number(top) == 1 && !self.effect_bans.contains(&1) => 0,
-            _ => 1,
-        };
-        self.current = Some(self.get_relative_player(&player_id, skips));
-
-        // flush
-        if self.current == self.last_served_player_id {
-            let to = if number(top) == 2 && !self.effect_bans.contains(&2) {
-                FieldKey::Excluded
-            } else {
-                FieldKey::Trashes
-            };
-            self.flush_river(&to)?;
-        }
-        Ok(())
     }
 }

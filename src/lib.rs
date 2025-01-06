@@ -1,23 +1,33 @@
 use crate::game_view::Ctx;
 use anyhow::anyhow;
-use card::Card;
-use events::{
-    answer::Answer, distribute::Distribute, pass::Pass, select::Select, serve::Serve, Event,
-    EventHandler,
-};
+use event::{dispatch_event, Event};
 use extism_pdk::*;
-use game::{Game, GameAndEvent};
+use game::Game;
+use serde::{Deserialize, Serialize};
 
-pub mod card;
-pub mod deck;
-
-mod events;
+mod card;
+mod cards_effect;
+mod deck;
+mod event;
 mod game;
 mod game_view;
 
+#[derive(Serialize, Deserialize, ToBytes, FromBytes)]
+#[encoding(Json)]
+struct GameAndEvent {
+    game: Game,
+    event: Event,
+}
+
+impl From<(Game, Event)> for GameAndEvent {
+    fn from((game, event): (Game, Event)) -> Self {
+        Self { game, event }
+    }
+}
+
 #[derive(serde::Deserialize)]
-pub struct GameConfig {
-    pub player_ids: Vec<String>,
+struct GameConfig {
+    player_ids: Vec<String>,
 }
 
 #[plugin_fn]
@@ -34,47 +44,31 @@ pub fn get_state(_: ()) -> FnResult<Game> {
 }
 
 #[derive(serde::Deserialize)]
-pub struct HandleEventArg {
-    pub game: Game,
-    pub player_id: String,
-    pub event: Event,
-}
-
-pub fn into_event_handler(event: &Event) -> anyhow::Result<Option<Box<dyn EventHandler>>> {
-    match event {
-        Event::Distribute => Ok(Some(Box::new(Distribute))),
-        Event::Select { field, card } => Ok(Some(Box::new(Select {
-            field: field.clone(),
-            card: Card::try_from(card.as_str())?,
-        }))),
-        Event::Answer { option } => Ok(Some(Box::new(Answer {
-            answer: option.clone(),
-        }))),
-        Event::Serve => Ok(Some(Box::new(Serve))),
-        Event::Pass => Ok(Some(Box::new(Pass))),
-        _ => Ok(None),
-    }
+struct HandleEventArg {
+    game: Game,
+    player_id: String,
+    event: Event,
 }
 
 #[plugin_fn]
 pub fn handle_event(
     Json(HandleEventArg {
-        mut game,
+        game,
         player_id,
         event,
     }): Json<HandleEventArg>,
 ) -> FnResult<GameAndEvent> {
-    let Some(handler) = into_event_handler(&event)? else {
-        return Ok((game, Event::None).into());
-    };
-    let res = handler.on(player_id, &mut game)?;
-    Ok((game, res).into())
+    if game.current != Some(player_id) {
+        return Err(anyhow!("not your turn").into());
+    }
+    let (game, event) = dispatch_event(game, event)?;
+    Ok((game, event).into())
 }
 
 #[derive(serde::Deserialize)]
-pub struct RenderConfig {
+struct RenderConfig {
     game: Game,
-    pub player_id: String,
+    player_id: String,
 }
 
 #[plugin_fn]
