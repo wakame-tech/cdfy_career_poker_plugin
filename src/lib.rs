@@ -12,6 +12,7 @@ pub mod card;
 pub mod convert;
 pub mod deck;
 pub mod game;
+pub mod legal;
 pub mod rng;
 pub mod rules;
 pub mod wire;
@@ -225,9 +226,8 @@ fn decode_ids(data: &[u8]) -> Result<Vec<u64>> {
 
 #[plugin_fn]
 pub fn legal_actions(input: Json<(GameView, u32)>) -> FnResult<Json<Vec<Action>>> {
-    // Stub: real enumeration lands in task 7 (`legal.rs`).
-    let _ = input.into_inner();
-    Ok(Json(vec![]))
+    let (view, player) = input.into_inner();
+    Ok(Json(crate::legal::legal_actions(&view, player)))
 }
 
 #[plugin_fn]
