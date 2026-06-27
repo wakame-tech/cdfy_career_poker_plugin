@@ -3,7 +3,6 @@ use crate::{
     deck::Deck,
 };
 use anyhow::{anyhow, Result};
-use extism_pdk::{FromBytesOwned, ToBytes};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use std::collections::{HashMap, HashSet};
@@ -42,7 +41,7 @@ impl std::fmt::Display for FieldKey {
 }
 
 #[serde_as]
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct Game {
     // game state
     pub prompt: Vec<Prompt>,
@@ -69,20 +68,8 @@ pub struct Game {
     pub players: Vec<String>,
     pub selects: HashMap<String, Vec<Card>>,
     pub answers: HashMap<String, String>,
-}
-
-impl ToBytes<'_> for Game {
-    type Bytes = Vec<u8>;
-
-    fn to_bytes(&self) -> Result<Self::Bytes> {
-        Ok(serde_json::to_vec(self)?)
-    }
-}
-
-impl FromBytesOwned for Game {
-    fn from_bytes_owned(bytes: &[u8]) -> Result<Self> {
-        Ok(serde_json::from_slice(bytes)?)
-    }
+    /// finish order: players appended as their hands empty (first = winner).
+    pub ranks: Vec<String>,
 }
 
 impl Game {
@@ -112,6 +99,7 @@ impl Game {
             players: player_ids.clone(),
             answers: HashMap::new(),
             selects: HashMap::from_iter(player_ids.iter().map(|id| (id.to_string(), Vec::new()))),
+            ranks: vec![],
         }
     }
 
@@ -159,6 +147,45 @@ impl Game {
         active_player_ids[index].clone()
     }
 
+    /// Next still-active player in seating order after `player_id`, honoring
+    /// `skips`.
+    ///
+    /// - `skips == 1`: the immediate next active player (normal turn).
+    /// - `skips == 0`: keep `player_id` if still active (8-cut / 2 / one-chance
+    ///   "same player restarts"); but if `player_id` just finished, fall through
+    ///   to the next active player so the lead is passed on.
+    /// - `skips == n` (n > 1): advance past `n` active players (5-skip).
+    ///
+    /// Unlike [`get_relative_player`], this walks the seating order
+    /// (`self.players`) so it works even when `player_id` is no longer active
+    /// (just emptied their hand). Returns `None` only when nobody is active.
+    pub fn next_active_player(&self, player_id: &str, skips: i32) -> Option<String> {
+        let active = self.active_player_ids();
+        if active.is_empty() {
+            return None;
+        }
+        let is_active = active.iter().any(|p| p == player_id);
+        if skips == 0 && is_active {
+            return Some(player_id.to_string());
+        }
+        // skips == 0 with a just-finished player behaves like skips == 1.
+        let steps = if skips <= 0 { 1 } else { skips };
+        let seat = self.players.iter().position(|p| p == player_id)?;
+        let n = self.players.len();
+        let mut idx = seat;
+        let mut count = 0;
+        loop {
+            idx = (idx + 1) % n;
+            let pid = &self.players[idx];
+            if active.iter().any(|p| p == pid) {
+                count += 1;
+                if count == steps {
+                    return Some(pid.clone());
+                }
+            }
+        }
+    }
+
     fn flush_river(&mut self, to: &FieldKey) -> Result<()> {
         let cards = self.river.iter().flatten().cloned().collect::<Vec<_>>();
         self.field_mut(to)?.0.extend(cards);
@@ -176,28 +203,46 @@ impl Game {
     pub fn on_end_turn(&mut self) -> Result<()> {
         let player_id = self.current.clone().unwrap();
 
-        let hand = self.field(&FieldKey::Hands(player_id.clone()))?;
-        if hand.0.is_empty() && self.active_player_ids().len() == 1 {
+        // Record the finisher: a player who just emptied their hand is appended
+        // to the finish order (first finisher = 大富豪). Idempotent.
+        let hand_empty = self
+            .field(&FieldKey::Hands(player_id.clone()))?
+            .0
+            .is_empty();
+        if hand_empty && !self.ranks.contains(&player_id) {
+            self.ranks.push(player_id.clone());
+        }
+
+        // The round ends once at most one active player remains.
+        if self.active_player_ids().len() <= 1 {
             return Err(anyhow!("end"));
         }
 
         let top = self
             .river
             .last()
-            .expect("river must not be empty when end turn");
+            .expect("river must not be empty when end turn")
+            .clone();
 
         // next player
-        let skips = match top {
-            _ if number(top) == 5 && !self.effect_limits.contains(&5) => top.len() as i32 + 1,
-            _ if number(top) == 8 && !self.effect_limits.contains(&8) => 0,
-            _ if number(top) == 1 && !self.effect_limits.contains(&1) => 0,
+        let skips = match &top {
+            _ if number(&top) == 5 && !self.effect_limits.contains(&5) => top.len() as i32 + 1,
+            _ if number(&top) == 8 && !self.effect_limits.contains(&8) => 0,
+            _ if number(&top) == 1 && !self.effect_limits.contains(&1) => 0,
             _ => 1,
         };
-        self.current = Some(self.get_relative_player(&player_id, skips));
+        self.current = self.next_active_player(&player_id, skips);
 
-        // flush
-        if self.current == self.last_served_player_id {
-            let to = if number(top) == 2 && !self.effect_limits.contains(&2) {
+        // Flush when the lead returns to the last server. If that server has
+        // since finished, the lead is inherited by the next active player after
+        // them, so the new leader gets a fresh river.
+        let flush_anchor = match &self.last_served_player_id {
+            Some(lead) if self.active_player_ids().iter().any(|p| p == lead) => Some(lead.clone()),
+            Some(lead) => self.next_active_player(lead, 1),
+            None => None,
+        };
+        if self.current.is_some() && self.current == flush_anchor {
+            let to = if number(&top) == 2 && !self.effect_limits.contains(&2) {
                 FieldKey::Excluded
             } else {
                 FieldKey::Trushes
