@@ -10,6 +10,7 @@ use game::Game;
 
 pub mod card;
 pub mod deck;
+pub mod wire;
 
 mod events;
 mod game;
