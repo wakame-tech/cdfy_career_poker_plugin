@@ -106,8 +106,12 @@ pub fn setup(cfg: Json<Config>) -> FnResult<Json<GameView>> {
 }
 
 #[plugin_fn]
-pub fn apply_action(input: Json<(GameView, Action)>) -> FnResult<Json<GameView>> {
-    let (view, action) = input.into_inner();
+pub fn apply_action(input: Json<(GameView, u32, Action)>) -> FnResult<Json<GameView>> {
+    // `_player` is the acting seat (cdfy_next attribution contract: input is now
+    // [view, player, action]). Career poker attributes via the game's internal
+    // turn-holder (`game.current`), which the server's seat/turn gate guarantees
+    // equals the actor, so the param is accepted but not yet used.
+    let (view, _player, action) = input.into_inner();
     let next_turn = view.turn.wrapping_add(1);
     let mut game = from_view(&view).map_err(|e| WithReturnCode::new(e, 1))?;
 
