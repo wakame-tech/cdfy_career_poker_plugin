@@ -34,22 +34,24 @@ pub fn validate_serve(game: &Game, serves: &[Card]) -> Result<()> {
     if ordering.is_lt() {
         return Err(anyhow!("must be greater than top card"));
     }
-    // check river size
-    let river_size = game.river_size.unwrap();
-    let expected_river_size = match number(serves) {
-        9 if !game.effect_limits.contains(&9) => match river_size {
-            1 => 3,
-            3 => 1,
-            n => n,
-        },
-        _ => serves.len(),
-    };
-    if river_size != expected_river_size {
-        return Err(anyhow!(
-            "expected river size {} but {}",
-            expected_river_size,
-            river_size
-        ));
+    // check river size. `river_size` may be `None` if a prior one-chance
+    // cancelled an effect without setting it; treat that as "no constraint".
+    if let Some(river_size) = game.river_size {
+        let expected_river_size = match number(serves) {
+            9 if !game.effect_limits.contains(&9) => match river_size {
+                1 => 3,
+                3 => 1,
+                n => n,
+            },
+            _ => serves.len(),
+        };
+        if river_size != expected_river_size {
+            return Err(anyhow!(
+                "expected river size {} but {}",
+                expected_river_size,
+                river_size
+            ));
+        }
     }
     // check steps
     if game.is_step && cardinal(number(serves)) - cardinal(number(top)) != 1 {
@@ -338,15 +340,19 @@ pub fn answer_one_chance(
     let all_answered = prompt.player_ids.iter().collect::<HashSet<_>>()
         == game.answers.keys().collect::<HashSet<_>>();
     if all_answered {
-        let any_used = game.answers.values().any(|a| a == "serve");
+        // Players who actually declared their Ace (answered "serve").
+        let used_players: Vec<String> = prompt
+            .player_ids
+            .iter()
+            .filter(|pid| game.answers.get(*pid).map(|a| a == "serve").unwrap_or(false))
+            .cloned()
+            .collect();
+        let any_used = !used_players.is_empty();
         game.answers.clear();
-        // reset prompted players' selects
-        for pid in &prompt.player_ids {
-            game.selects.insert(pid.clone(), vec![]);
-        }
-        game.prompt.pop();
 
         let server = game.current.clone().unwrap();
+        // The served card is still the river top here; capture it before the
+        // declared Ace(s) are pushed on top.
         let serves = game
             .river
             .last()
@@ -360,6 +366,22 @@ pub fn answer_one_chance(
         } else {
             true
         };
+
+        // The declared Ace leaves the player's hand and goes to the river,
+        // regardless of the RPS outcome.
+        for pid in &used_players {
+            let ace = game.selects.get(pid).cloned().unwrap_or_default();
+            if !ace.is_empty() {
+                game.field_mut(&FieldKey::Hands(pid.clone()))?.remove(&ace)?;
+                game.river.push(ace);
+            }
+        }
+        // reset prompted players' selects
+        for pid in &prompt.player_ids {
+            game.selects.insert(pid.clone(), vec![]);
+        }
+        game.prompt.pop();
+
         if run_effect {
             effect(game, &server, &serves)?;
         }
