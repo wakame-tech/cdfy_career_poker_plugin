@@ -7,7 +7,7 @@
 
 use crate::{
     card::{card_ord, cardinal, is_same_number, match_suits, number, suits, Card},
-    deck::deck_ord,
+    deck::{deck_ord, Deck},
     game::{FieldKey, Game, Prompt, PromptKind},
 };
 use anyhow::{anyhow, Result};
@@ -370,11 +370,105 @@ pub fn answer_one_chance(
     Ok(())
 }
 
+/// Move `k` cards from `from`'s hand to `to`'s hand. When `strongest`, the
+/// `k` strongest cards are moved (the poor giving up to the rich); otherwise the
+/// `k` weakest (the rich giving down to the poor). Auto-selection for v1.
+fn give(game: &mut Game, from: &str, to: &str, k: usize, strongest: bool) -> Result<()> {
+    let mut hand = game.field(&FieldKey::Hands(from.to_string()))?.0.clone();
+    hand.sort_by(card_ord); // ascending: weakest first, strongest last
+    let chosen: Vec<Card> = if strongest {
+        hand.iter().rev().take(k).cloned().collect()
+    } else {
+        hand.iter().take(k).cloned().collect()
+    };
+    game.transfer(
+        &FieldKey::Hands(from.to_string()),
+        &FieldKey::Hands(to.to_string()),
+        chosen,
+    )?;
+    game.field_mut(&FieldKey::Hands(to.to_string()))?
+        .sort(card_ord);
+    game.field_mut(&FieldKey::Hands(from.to_string()))?
+        .sort(card_ord);
+    Ok(())
+}
+
+/// Post-round role card exchange (v1 auto-give). `game.ranks` must hold the full
+/// finish order (index 0 = 大富豪, last = 大貧民). 大貧民 gives 大富豪 its 2
+/// strongest, 大富豪 gives 大貧民 its 2 weakest; with >=4 players 貧民/富豪 swap
+/// 1 card the same way.
+pub fn exchange(game: &mut Game) -> Result<()> {
+    let ranks = game.ranks.clone();
+    let n = ranks.len();
+    if n < 2 {
+        return Ok(());
+    }
+    let (daifugo, daihinmin) = (ranks[0].clone(), ranks[n - 1].clone());
+    give(game, &daihinmin, &daifugo, 2, true)?;
+    give(game, &daifugo, &daihinmin, 2, false)?;
+    if n >= 4 {
+        let (fugo, hinmin) = (ranks[1].clone(), ranks[n - 2].clone());
+        give(game, &hinmin, &fugo, 1, true)?;
+        give(game, &fugo, &hinmin, 1, false)?;
+    }
+    Ok(())
+}
+
+/// Start the next round: re-deal via `rng`, reset round state, run the role
+/// exchange based on the previous finish order, and set 大貧民 to lead.
+pub fn deal_new_round(game: &mut Game, rng: &mut impl FnMut() -> u64) -> Result<()> {
+    // Full finish order: ranked finishers first, then any remaining player.
+    let mut order = game.ranks.clone();
+    for pid in &game.players {
+        if !order.contains(pid) {
+            order.push(pid.clone());
+        }
+    }
+
+    let n = game.players.len();
+    let mut deck = Deck::all(2);
+    deck.shuffle_with(rng);
+    let decks = deck.split(n)?;
+    for (i, pid) in game.players.clone().iter().enumerate() {
+        let mut d = decks[i].clone();
+        d.sort(card_ord);
+        game.fields.insert(FieldKey::Hands(pid.clone()), d);
+    }
+
+    // reset round state
+    game.river.clear();
+    game.river_size = None;
+    game.suit_limits.clear();
+    game.effect_limits.clear();
+    game.turn_revoluted = false;
+    game.is_step = false;
+    game.revoluted = false;
+    game.prompt.clear();
+    game.answers.clear();
+    for pid in game.players.clone() {
+        game.selects.insert(pid, vec![]);
+    }
+    game.last_served_player_id = None;
+
+    // exchange uses the full previous order
+    game.ranks = order.clone();
+    exchange(game)?;
+
+    // 大貧民 leads the new round; finish order resets
+    game.current = order.last().cloned().or_else(|| game.players.first().cloned());
+    game.ranks.clear();
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::card::Suit;
     use crate::deck::Deck;
+
+    fn n_spade(n: u8) -> Card {
+        Card::Number(Suit::Spade, n)
+    }
 
     fn game_with_hand(p0_hand: Vec<Card>, p1_hand: Vec<Card>) -> Game {
         let mut g = Game::new(vec!["p0".into(), "p1".into()]);
@@ -517,5 +611,46 @@ mod tests {
         g.river = vec![vec![Card::Number(Suit::Heart, 7)]];
         g.river_size = Some(1);
         assert!(pass(&mut g, "p1").is_err());
+    }
+
+    fn hand(g: &Game, pid: &str) -> Vec<Card> {
+        g.field(&FieldKey::Hands(pid.to_string())).unwrap().0.clone()
+    }
+
+    #[test]
+    fn exchange_swaps_extremes() {
+        let mut g = Game::new(vec!["p0".into(), "p1".into(), "p2".into(), "p3".into()]);
+        g.fields.insert(FieldKey::Hands("p0".into()), Deck::new(vec![n_spade(3), n_spade(4)]));
+        g.fields.insert(FieldKey::Hands("p1".into()), Deck::new(vec![n_spade(5), n_spade(6)]));
+        g.fields.insert(FieldKey::Hands("p2".into()), Deck::new(vec![n_spade(7), n_spade(8)]));
+        g.fields.insert(FieldKey::Hands("p3".into()), Deck::new(vec![n_spade(13), n_spade(2)]));
+        // finish order: p0 daifugo .. p3 daihinmin
+        g.ranks = vec!["p0".into(), "p1".into(), "p2".into(), "p3".into()];
+        exchange(&mut g).unwrap();
+        // p3 gave its 2 strongest (2,K) to p0; p0 gave its 2 weakest (3,4) back
+        assert_eq!(hand(&g, "p0"), vec![n_spade(13), n_spade(2)]);
+        assert_eq!(hand(&g, "p3"), vec![n_spade(3), n_spade(4)]);
+        // p2 gave its strongest (8) to p1; p1 gave its weakest (5) back
+        assert_eq!(hand(&g, "p1"), vec![n_spade(6), n_spade(8)]);
+        assert_eq!(hand(&g, "p2"), vec![n_spade(5), n_spade(7)]);
+    }
+
+    #[test]
+    fn deal_new_round_refills_and_sets_daihinmin() {
+        let mut g = Game::new(vec!["p0".into(), "p1".into(), "p2".into()]);
+        g.ranks = vec!["p1".into()]; // p1 finished first last round
+        let mut seed: u64 = 99;
+        let mut rng = || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            seed
+        };
+        deal_new_round(&mut g, &mut rng).unwrap();
+        // 54 cards dealt across 3 hands
+        let total: usize = g.players.iter().map(|p| hand(&g, p).len()).sum();
+        assert_eq!(total, 54);
+        // full order = [p1, p0, p2]; daihinmin = p2 leads
+        assert_eq!(g.current, Some("p2".to_string()));
+        assert!(g.ranks.is_empty());
+        assert!(g.river.is_empty());
     }
 }

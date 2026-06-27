@@ -206,6 +206,12 @@ fn dispatch(game: &mut Game, view: &GameView, action: &Action) -> Result<()> {
             record_finishers(game);
             r
         }
+        "next_round" => {
+            if !is_ended(game) {
+                return Err(anyhow!("round not ended"));
+            }
+            rules::deal_new_round(game, &mut rng)
+        }
         other => Err(anyhow!("unknown action kind {}", other)),
     }
 }
