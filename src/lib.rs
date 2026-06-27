@@ -5,6 +5,7 @@
 //! internal game model + wire types + host RNG bridge.
 
 pub mod card;
+pub mod convert;
 pub mod deck;
 pub mod game;
 pub mod rng;
