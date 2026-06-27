@@ -13,6 +13,7 @@ pub mod convert;
 pub mod deck;
 pub mod game;
 pub mod legal;
+pub mod observe;
 pub mod rng;
 pub mod rules;
 pub mod wire;
@@ -232,9 +233,8 @@ pub fn legal_actions(input: Json<(GameView, u32)>) -> FnResult<Json<Vec<Action>>
 
 #[plugin_fn]
 pub fn observe(input: Json<(GameView, u32)>) -> FnResult<Json<GameView>> {
-    // Stub: per-player masking lands in task 8.
-    let (view, _player) = input.into_inner();
-    Ok(Json(view))
+    let (view, player) = input.into_inner();
+    Ok(Json(crate::observe::observe(&view, player)))
 }
 
 #[plugin_fn]
