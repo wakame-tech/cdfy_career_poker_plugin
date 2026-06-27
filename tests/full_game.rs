@@ -5,19 +5,16 @@
 //! source threaded into `Deck::shuffle_with` (the deal) and the one-chance RPS.
 //! Here that source is a fixed counter closure, so every run is reproducible.
 //!
-//! NOTE on player count: the headline "full game to a finished state" uses 2
-//! players. With 3+ players the engine panics on the *first* finisher —
-//! `Game::on_end_turn` calls `get_relative_player(current)` after the current
-//! player has emptied their hand, but that player is no longer in
-//! `active_player_ids()`, so the `position(...).unwrap()` blows up. The
-//! `four_player_first_finisher_panics` test pins that bug; until it is fixed a
-//! multi-finisher game cannot be driven to completion. See the report.
+//! NOTE on player count: both a 2-player and a 4-player game are driven all the
+//! way to the engine's `"end"` signal, asserting the full finish order. The
+//! 4-player case exercises multiple finishers in sequence — `on_end_turn`
+//! advances the lead past a just-finished player in seating order and flushes
+//! the river for the inheriting leader.
 
 mod common;
 
-use std::panic::{catch_unwind, AssertUnwindSafe};
-
 use common::*;
+use cdfy_plugin_career_poker::card::Suit;
 use cdfy_plugin_career_poker::game::{FieldKey, Game};
 use cdfy_plugin_career_poker::rules::{answer_one_chance, deal_new_round, pass, serve};
 
@@ -146,25 +143,58 @@ fn fixed_rng_yields_reproducible_deal() {
     assert_eq!(total, 54, "the full 54-card deck is dealt");
 }
 
-/// KNOWN BUG (report): with 3+ players the first finisher panics. p0 plays its
-/// only card while p1/p2/p3 still hold cards; `on_end_turn` then asks for the
-/// player relative to p0, but p0 is no longer active, so
-/// `get_relative_player`'s `unwrap` panics. This blocks driving any 3+ player
-/// game to completion.
+/// A complete four-player game driven to the engine's `"end"` signal, with
+/// multiple finishers in sequence.
+///
+/// Each finisher empties on a fresh river by playing a lone 6 (the only
+/// effect-free card). Because the just-finished player was the last server, the
+/// lead is inherited by the next active player in seating order and the river is
+/// flushed, so the next player leads on an empty river and empties in turn.
+/// p3 keeps a spare 2 so it never empties and is the leftover 大貧民.
+///
+/// Finish order (role order, 大富豪 → 大貧民): p0, p1, p2, p3.
 #[test]
-fn four_player_first_finisher_panics() {
+fn deterministic_four_player_game_reaches_end() {
+    let mut ranks: Vec<String> = vec![];
+
     let mut g = game(&["p0", "p1", "p2", "p3"]);
     set_hand(&mut g, "p0", vec![s(6)]);
-    set_hand(&mut g, "p1", vec![s(7)]);
-    set_hand(&mut g, "p2", vec![s(8)]);
-    set_hand(&mut g, "p3", vec![s(13), s(2)]);
+    set_hand(&mut g, "p1", vec![c(Suit::Diamond, 6)]);
+    set_hand(&mut g, "p2", vec![c(Suit::Heart, 6)]);
+    set_hand(&mut g, "p3", vec![c(Suit::Clover, 6), s(2)]);
     g.current = Some("p0".into());
-    select(&mut g, "p0", vec![s(6)]);
 
-    let result = catch_unwind(AssertUnwindSafe(|| serve(&mut g, "p0")));
-    assert!(
-        result.is_err(),
-        "the first finisher with >1 active player panics in on_end_turn \
-         (get_relative_player unwrap) — see report"
+    // T1: p0 leads its only 6 and empties (大富豪). Lead passes to p1, river flushes.
+    select(&mut g, "p0", vec![s(6)]);
+    serve(&mut g, "p0").expect("p0 leads 6 and finishes");
+    record_finishers(&g, &mut ranks);
+    assert_eq!(g.current, Some("p1".to_string()));
+    assert!(g.river.is_empty(), "river flushed for the inheriting leader p1");
+    assert_eq!(g.active_player_ids(), vec!["p1", "p2", "p3"]);
+
+    // T2: p1 leads its only 6 and empties (富豪). Lead passes to p2, river flushes.
+    select(&mut g, "p1", vec![c(Suit::Diamond, 6)]);
+    serve(&mut g, "p1").expect("p1 leads 6 and finishes");
+    record_finishers(&g, &mut ranks);
+    assert_eq!(g.current, Some("p2".to_string()));
+    assert!(g.river.is_empty(), "river flushed for the inheriting leader p2");
+    assert_eq!(g.active_player_ids(), vec!["p2", "p3"]);
+
+    // T3: p2 leads its only 6 and empties → only p3 remains active ⇒ game over.
+    select(&mut g, "p2", vec![c(Suit::Heart, 6)]);
+    let end = serve(&mut g, "p2");
+    let err = end.expect_err("emptying the second-to-last active hand ends the game");
+    assert_eq!(err.to_string(), "end");
+    record_finishers(&g, &mut ranks);
+
+    // p3 is the sole leftover (大貧民).
+    assert_eq!(g.active_player_ids(), vec!["p3".to_string()]);
+    // The engine records the finish order in `ranks` as players empty.
+    assert_eq!(g.ranks, vec!["p0", "p1", "p2"]);
+    // Full role order, 大富豪 … 大貧民.
+    assert_eq!(
+        full_order(&g, &ranks),
+        vec!["p0".to_string(), "p1".to_string(), "p2".to_string(), "p3".to_string()]
     );
+    assert_eq!(g.ranks, ranks, "engine ranks match the mirrored record_finishers");
 }
