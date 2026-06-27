@@ -9,7 +9,5 @@ pub mod convert;
 pub mod deck;
 pub mod game;
 pub mod rng;
+pub mod rules;
 pub mod wire;
-
-// The original event-handler logic; ported to plain functions in `rules.rs`.
-mod events;
