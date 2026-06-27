@@ -3,7 +3,6 @@ use crate::{
     deck::Deck,
 };
 use anyhow::{anyhow, Result};
-use extism_pdk::{FromBytesOwned, ToBytes};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use std::collections::{HashMap, HashSet};
@@ -42,7 +41,7 @@ impl std::fmt::Display for FieldKey {
 }
 
 #[serde_as]
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct Game {
     // game state
     pub prompt: Vec<Prompt>,
@@ -69,20 +68,8 @@ pub struct Game {
     pub players: Vec<String>,
     pub selects: HashMap<String, Vec<Card>>,
     pub answers: HashMap<String, String>,
-}
-
-impl ToBytes<'_> for Game {
-    type Bytes = Vec<u8>;
-
-    fn to_bytes(&self) -> Result<Self::Bytes> {
-        Ok(serde_json::to_vec(self)?)
-    }
-}
-
-impl FromBytesOwned for Game {
-    fn from_bytes_owned(bytes: &[u8]) -> Result<Self> {
-        Ok(serde_json::from_slice(bytes)?)
-    }
+    /// finish order: players appended as their hands empty (first = winner).
+    pub ranks: Vec<String>,
 }
 
 impl Game {
@@ -112,6 +99,7 @@ impl Game {
             players: player_ids.clone(),
             answers: HashMap::new(),
             selects: HashMap::from_iter(player_ids.iter().map(|id| (id.to_string(), Vec::new()))),
+            ranks: vec![],
         }
     }
 

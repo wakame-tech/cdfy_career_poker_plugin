@@ -1,6 +1,5 @@
 use crate::card::{card_ord, Card, Suit};
 use anyhow::{anyhow, Result};
-use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, collections::HashSet};
 
@@ -14,9 +13,19 @@ impl From<Vec<Card>> for Deck {
 }
 
 impl Deck {
-    pub fn shuffle(&mut self) {
-        let mut rng = rand::thread_rng();
-        self.0.shuffle(&mut rng);
+    /// Fisher-Yates shuffle driven by an injected `u64` source. Must match
+    /// cdfy_next `RngState::shuffle`: i from n-1 downto 1, j = r % (i+1), swap.
+    /// The source is the host `rand_u64` draw in production (see `rng.rs`).
+    pub fn shuffle_with(&mut self, rng: &mut impl FnMut() -> u64) {
+        let n = self.0.len();
+        if n < 2 {
+            return;
+        }
+        for i in (1..n).rev() {
+            let r = rng();
+            let j = (r % (i as u64 + 1)) as usize;
+            self.0.swap(i, j);
+        }
     }
 
     pub fn sort<F>(&mut self, ord: F)

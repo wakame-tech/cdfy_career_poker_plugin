@@ -16,7 +16,7 @@ impl EventHandler for Distribute {
             return Err(anyhow!("players is empty"));
         }
         let mut deck = Deck::all(2);
-        deck.shuffle();
+        deck.shuffle_with(&mut crate::rng::next_u64);
         let mut decks = deck.split(game.players.len())?;
         for (i, player_id) in game.players.iter().enumerate() {
             decks[i].sort(card_ord);
