@@ -141,11 +141,13 @@ impl IdGen {
 fn cards_to_wire(cards: &[Card], ids: &mut IdGen, face: Face) -> Vec<WCard> {
     cards
         .iter()
-        .map(|c| WCard {
-            id: ids.next(),
-            proto: card_to_proto(c),
-            attrs: BTreeMap::new(),
-            face,
+        .map(|c| {
+            // Carry a human-readable label (e.g. "3♠") in attrs so any generic
+            // renderer (CLI, web UI) can display the card without re-deriving it
+            // from the proto. Display data belongs in the view, not the consumer.
+            let mut attrs = BTreeMap::new();
+            attrs.insert("label".to_string(), Value::Str(c.to_string()));
+            WCard { id: ids.next(), proto: card_to_proto(c), attrs, face }
         })
         .collect()
 }
