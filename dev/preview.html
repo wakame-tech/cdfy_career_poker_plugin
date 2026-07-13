@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>career-poker UI preview</title>
+    <style>
+      body { margin: 0; font-family: ui-monospace, monospace; }
+      #bar {
+        position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+        background: #111; color: #fff; padding: 8px 12px;
+        display: flex; gap: 8px; align-items: center; font-size: 13px;
+      }
+      #bar button { font: inherit; padding: 4px 10px; border-radius: 6px; border: 0; cursor: pointer; }
+      #bar .act { margin-left: auto; opacity: 0.85; }
+      #cdfy-root { margin-top: 44px; }
+    </style>
+  </head>
+  <body>
+    <!-- The bundle renders into #cdfy-root; the bar is the dev harness chrome. -->
+    <div id="bar"></div>
+    <div id="cdfy-root"></div>
+    <script src="preview.js"></script>
+    <script src="../ui.js"></script>
+    <script>
+      PREVIEW.init();
+    </script>
+  </body>
+</html>

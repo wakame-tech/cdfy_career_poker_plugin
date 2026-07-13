@@ -90,15 +90,31 @@ create a room for it:
 # 1. build
 ./build.sh
 
-# 2. push the wasm into the cdfy_next store
+# 2. push the wasm + the custom UI bundle into the cdfy_next store
 cdfy push-game target/wasm32-unknown-unknown/release/cdfy_plugin_career_poker.wasm \
-  --id career-poker
+  --id career-poker --name "Career Poker" --min-players 2 --max-players 6 \
+  --ui ui.js
 
-# 3. create a room (N players) on the running cdfy_next server, then play:
-#    legal_actions advertises each legal serve/pass/select/one_chance as a
-#    button; choosing one calls apply_action, and status reports Running/Ended.
+# 3. create a room (N players) on the running cdfy_next server, then play.
 ```
 
-The generic cdfy_next web UI renders one button per advertised `legal_action`
-(labelled by `kind`); for Daifugo every legal play is a separate `serve` action,
-so expect many similarly-labelled buttons until a Daifugo-specific UI exists.
+`--ui ui.js` records the bundle's sha256 in `meta.json` and stores it at
+`games/career-poker/ui.js`; upload the wasm, `ui.js`, and `meta.json` to R2 like
+any game.
+
+## Custom UI
+
+`ui.js` is a self-contained Daifugo table that cdfy_next runs inside a
+sandboxed iframe, replacing the generic renderer (which shows one button per
+`legal_action` — dozens of near-identical `serve` buttons for Daifugo). It draws
+the opponents' hand counts and ranks, the river with its active flags
+(革命 / 縛り / 階段), and your own hand as clickable cards; a selection is matched
+against the advertised `legal` set, so only legal plays can be served. See
+`docs/2026-07-13-custom-ui-design.md`.
+
+### Local UI preview
+
+Open `dev/preview.html` in a browser (no server needed). It loads `ui.js` with a
+mock `cdfy` host and sample views for each phase (serve / select / one-chance /
+ended); the bar switches between them and shows the action a click would send.
+`dev/` is a developer tool and is not part of the published bundle.
