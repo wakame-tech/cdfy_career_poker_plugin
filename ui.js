@@ -10,7 +10,9 @@
 // so this UI never computes rules: it matches the player's selection against it.
 //
 // View shape: src/convert.rs. Zones: 0..N hands (owner=N), 100 river,
-// 101 trushes, 102 excluded, 200 meta (one card whose attrs carry the flags).
+// 101 trushes, 102 excluded, 200 meta (one card whose attrs carry the public
+// flags). Zone 201 is the engine's private bookkeeping and never arrives here:
+// it is Hidden, so the core strips it from every observed view.
 // Card attr values are externally tagged: {"Int":n}/{"Str":s}/{"Bool":b}/{"List":[..]}.
 (function () {
   var RIVER = 100, META = 200;

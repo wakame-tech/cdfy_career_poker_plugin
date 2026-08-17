@@ -23,10 +23,12 @@
 //! - `Joker(Some((suit, n)))` -> `9000 + suit_index*100 + n`.
 //!
 //! ## Meta attrs keys
-//! `players: List[Str]`, `river_size: Int(-1=None)`, `revoluted/turn_revoluted/
-//! is_step: Bool`, `suit_limits: List[Str]`, `effect_limits: List[Int]`,
-//! `last_served: Int(-1=None)`, `river_groups: List[Int]`, `ranks: List[Int]`,
-//! `prompt/selects/answers: Str` (JSON).
+//! Public (`META`, the UI reads these): `players: List[Str]`,
+//! `river_size: Int(-1=None)`, `revoluted/turn_revoluted/is_step: Bool`,
+//! `suit_limits: List[Str]`, `effect_limits: List[Int]`,
+//! `last_served: Int(-1=None)`, `river_groups: List[Int]`, `ranks: List[Int]`.
+//!
+//! Private (`META_PRIVATE`): `prompt/selects/answers: Str` (JSON).
 
 use crate::card::{Card, Suit};
 use crate::deck::Deck;
@@ -39,6 +41,11 @@ pub const RIVER: u32 = 100;
 pub const TRUSHES: u32 = 101;
 pub const EXCLUDED: u32 = 102;
 pub const META: u32 = 200;
+/// Bookkeeping only the engine may see. Split out of `META` because the core
+/// masks a zone as a whole: `selects` and `answers` are a player's in-progress
+/// choices and must not reach the other seats, while the flags in `META` are
+/// public and the UI reads them.
+pub const META_PRIVATE: u32 = 201;
 pub const META_PROTO: u32 = 9999;
 
 // --- card <-> proto --------------------------------------------------------
@@ -270,28 +277,47 @@ pub fn to_view(game: &Game) -> GameView {
         .map(|i| Value::Int(i as i64))
         .collect();
     attrs.insert("ranks".into(), Value::List(ranks));
-    attrs.insert(
+
+    zones.push(Zone {
+        id: META,
+        owner: None,
+        kind: ZoneKind::Set,
+        visibility: Visibility::Public,
+        cards: vec![WCard {
+            id: ids.next(),
+            proto: META_PROTO,
+            attrs,
+            face: Face::Down,
+        }],
+    });
+
+    // The engine's own bookkeeping. `Hidden`, so the core strips it from every
+    // observed view: `selects` is what a player has picked but not yet
+    // committed, and `answers` accumulates during the simultaneous one-chance
+    // phase. Neither belongs on another seat's screen.
+    let mut private: BTreeMap<String, Value> = BTreeMap::new();
+    private.insert(
         "prompt".into(),
         Value::Str(serde_json::to_string(&game.prompt).unwrap()),
     );
-    attrs.insert(
+    private.insert(
         "selects".into(),
         Value::Str(serde_json::to_string(&game.selects).unwrap()),
     );
-    attrs.insert(
+    private.insert(
         "answers".into(),
         Value::Str(serde_json::to_string(&game.answers).unwrap()),
     );
 
     zones.push(Zone {
-        id: META,
+        id: META_PRIVATE,
         owner: None,
         kind: ZoneKind::Set,
         visibility: Visibility::Hidden,
         cards: vec![WCard {
             id: ids.next(),
             proto: META_PROTO,
-            attrs,
+            attrs: private,
             face: Face::Down,
         }],
     });
@@ -316,6 +342,12 @@ pub fn to_view(game: &Game) -> GameView {
 
 // --- from_view -------------------------------------------------------------
 
+/// Rebuild the internal model from a view.
+///
+/// Takes the **authoritative** view, never an observed one: `META_PRIVATE` is
+/// `Hidden`, so the core has already stripped it from anything a client holds.
+/// Every plugin entry point is called by the engine with the authoritative
+/// state, so this holds.
 pub fn from_view(view: &GameView) -> Result<Game> {
     let meta_zone = view
         .zone(META)
@@ -325,6 +357,15 @@ pub fn from_view(view: &GameView) -> Result<Game> {
         .first()
         .ok_or_else(|| anyhow!("meta card missing"))?;
     let attrs = &meta.attrs;
+
+    let private_zone = view
+        .zone(META_PRIVATE)
+        .ok_or_else(|| anyhow!("private meta zone {} missing", META_PRIVATE))?;
+    let private = &private_zone
+        .cards
+        .first()
+        .ok_or_else(|| anyhow!("private meta card missing"))?
+        .attrs;
 
     let players: Vec<String> = as_list(meta_get(attrs, "players")?)?
         .iter()
@@ -381,11 +422,11 @@ pub fn from_view(view: &GameView) -> Result<Game> {
         i => players.get(i as usize).cloned(),
     };
 
-    let prompt: Vec<Prompt> = serde_json::from_str(as_str(meta_get(attrs, "prompt")?)?)?;
+    let prompt: Vec<Prompt> = serde_json::from_str(as_str(meta_get(private, "prompt")?)?)?;
     let selects: HashMap<String, Vec<Card>> =
-        serde_json::from_str(as_str(meta_get(attrs, "selects")?)?)?;
+        serde_json::from_str(as_str(meta_get(private, "selects")?)?)?;
     let answers: HashMap<String, String> =
-        serde_json::from_str(as_str(meta_get(attrs, "answers")?)?)?;
+        serde_json::from_str(as_str(meta_get(private, "answers")?)?)?;
     let ranks: Vec<String> = as_list(meta_get(attrs, "ranks")?)?
         .iter()
         .map(|v| as_int(v).map(|i| players[i as usize].clone()))
@@ -415,6 +456,39 @@ mod tests {
     use super::*;
     use crate::card::{card_ord, Card, Suit};
     use crate::game::{Prompt, PromptKind};
+
+    /// The plugin's only redaction duty: label each zone correctly. The core
+    /// masks from these labels, so a wrong one here is a leak.
+    #[test]
+    fn every_zone_declares_who_may_see_it() {
+        let v = to_view(&dealt_game());
+
+        for seat in 0..3u32 {
+            let z = v.zone(seat).expect("hand zone");
+            assert_eq!(z.visibility, Visibility::Owner, "hand {seat}");
+            assert_eq!(z.owner, Some(seat), "hand {seat} needs an owner to mask by");
+        }
+
+        for id in [RIVER, TRUSHES, EXCLUDED, META] {
+            assert_eq!(v.zone(id).expect("zone").visibility, Visibility::Public, "zone {id}");
+        }
+
+        // selects/answers are a seat's uncommitted choices.
+        assert_eq!(v.zone(META_PRIVATE).expect("private meta").visibility, Visibility::Hidden);
+    }
+
+    #[test]
+    fn public_meta_carries_no_per_seat_state() {
+        let v = to_view(&dealt_game());
+        let attrs = &v.zone(META).unwrap().cards[0].attrs;
+        for k in ["prompt", "selects", "answers"] {
+            assert!(!attrs.contains_key(k), "{k} must live in META_PRIVATE");
+        }
+        // and the UI's keys stay where the UI looks for them
+        for k in ["players", "ranks", "river_groups", "revoluted", "suit_limits", "is_step", "river_size"] {
+            assert!(attrs.contains_key(k), "{k} missing from the public meta");
+        }
+    }
 
     fn dealt_game() -> Game {
         let mut g = Game::new(vec!["p0".into(), "p1".into(), "p2".into()]);

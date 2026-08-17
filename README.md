@@ -35,6 +35,11 @@ I/O is JSON over the Extism ABI; the shapes live in `src/wire.rs`.
 | `observe`       | `[GameView, PlayerId]` | `GameView`     |
 | `status`        | `GameView`          | `Status`          |
 
+`observe` is the identity function. Per-seat masking is the cdfy_next core's
+job: it reads `Zone.visibility` and strips what a viewer may not see after
+`observe` returns. This plugin's only duty is to label its zones — hands
+`Owner`, river and discards `Public`, engine bookkeeping `Hidden`.
+
 Host import the plugin declares and calls for randomness:
 
 ```rust
