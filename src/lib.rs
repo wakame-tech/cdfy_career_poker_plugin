@@ -5,15 +5,15 @@
 //! `rand_u64` host function. State transitions reuse the ported rules in
 //! `rules.rs`; the `GameView` <-> `Game` mapping lives in `convert.rs`.
 //!
-//! `legal_actions` and `observe` are minimal stubs here; their real
-//! implementations land in the parallel tasks 7 and 8.
+//! Redaction is **not** this plugin's job. `Zone.visibility` says who may see
+//! each zone and the cdfy_next core masks the rest after `observe` returns, so
+//! `observe` here is the identity function. See `docs/wire-contract.md`.
 
 pub mod card;
 pub mod convert;
 pub mod deck;
 pub mod game;
 pub mod legal;
-pub mod observe;
 pub mod rng;
 pub mod rules;
 pub mod wire;
@@ -235,10 +235,17 @@ pub fn legal_actions(input: Json<(GameView, u32)>) -> FnResult<Json<Vec<Action>>
     Ok(Json(crate::legal::legal_actions(&view, player)))
 }
 
+/// Identity. Daifugo has no per-seat masking beyond what `Zone.visibility`
+/// already states: hands are `Owner`, the river and the discard piles are
+/// `Public`, and the engine's bookkeeping is `Hidden`. The core applies that
+/// after this returns.
+///
+/// This used to flip `face` to `Down` on other seats' hands while leaving
+/// `proto` intact, which leaked every hand to every client.
 #[plugin_fn]
 pub fn observe(input: Json<(GameView, u32)>) -> FnResult<Json<GameView>> {
-    let (view, player) = input.into_inner();
-    Ok(Json(crate::observe::observe(&view, player)))
+    let (view, _player) = input.into_inner();
+    Ok(Json(view))
 }
 
 #[plugin_fn]

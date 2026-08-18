@@ -32,9 +32,11 @@ prompt phases (Select4/7/13, one-chance) and the end screen included.
 - **API:** the host injects `cdfy.onView(cb)` — `cb({ view, legal, seat })` fires
   on every update — and `cdfy.sendAction(kind, data)`. Render into
   `document.getElementById("cdfy-root")`.
-- **`view` is already observed:** other players' hand zones arrive `Face::Down`
-  (the plugin's `observe` masks them), so the bundle only ever sees counts, never
-  identities. The meta zone's attrs are public game state and pass through.
+- **`view` is already observed:** other players' hand zones arrive with their
+  identity stripped (`proto` redacted, `attrs` cleared, `Face::Down`), so the
+  bundle only ever sees counts. The cdfy_next core does this from
+  `Zone.visibility`, not the plugin. The meta zone (200) is public game state
+  and passes through; zone 201 is `Hidden` and never arrives.
 - **Actions are validated by the host authority** (turn/seat + legality); the UI
   only *requests*. `data` is a list of card ids (small integers).
 
